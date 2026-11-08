@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dvr-nvr-viewer"
+version = "0.1.0"
+description = "Watch all your DVR/NVR/IP cameras at once, in a desktop window or a web page. No browser plugins."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+dependencies = []  # standard library only; needs ffmpeg installed on the system
+keywords = ["dvr", "nvr", "cctv", "rtsp", "ip camera", "dahua", "hikvision", "raspberry pi", "ffmpeg"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Topic :: Multimedia :: Video :: Display",
+    "Topic :: Security",
+]
+
+[project.urls]
+Homepage = "https://github.com/tierbuilder/dvr-nvr-viewer"
+Issues = "https://github.com/tierbuilder/dvr-nvr-viewer/issues"
+
+[project.scripts]
+dvr-nvr-viewer = "dvr_nvr_viewer:main"
+
+[tool.setuptools]
+py-modules = ["dvr_nvr_viewer"]
