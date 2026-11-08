@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -137,20 +138,28 @@ class WebServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.port = free_port()
+        # keep the app's own output, so a failure to start explains itself
+        cls.log = tempfile.TemporaryFile()
         cls.proc = subprocess.Popen(
-            [sys.executable, SCRIPT, "1", "2", "4", "--test", "--no-browser", "--bind", "127.0.0.1",
+            [sys.executable, "-u", SCRIPT, "1", "2", "4", "--test", "--no-browser", "--bind", "127.0.0.1",
              "--web-port", str(cls.port), "--web-key", "testkey", "--layout", "1+5"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        deadline = time.time() + 20
-        while time.time() < deadline:
+            stdout=cls.log, stderr=subprocess.STDOUT)
+        deadline = time.time() + 60  # CI machines can be slow the first time a program runs
+        while time.time() < deadline and cls.proc.poll() is None:
             try:
                 socket.create_connection(("127.0.0.1", cls.port), timeout=1).close()
                 break
             except OSError:
                 time.sleep(0.2)
         else:
+            exited = cls.proc.poll()
             cls.proc.kill()
-            raise RuntimeError("server didn't start")
+            cls.proc.wait()
+            cls.log.seek(0)
+            output = cls.log.read().decode(errors="replace")
+            cls.log.close()
+            state = f"exited with code {exited}" if exited is not None else "still not listening after 60s"
+            raise RuntimeError(f"server didn't start ({state}). Its output:\n{output}")
         cls.base = f"http://127.0.0.1:{cls.port}"
 
     @classmethod
@@ -160,6 +169,7 @@ class WebServer(unittest.TestCase):
             cls.proc.wait(10)
         except subprocess.TimeoutExpired:
             cls.proc.kill()
+        cls.log.close()
 
     def browser(self):
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))

@@ -29,6 +29,10 @@ jobs:
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
+      - name: Show versions
+        run: |
+          python --version
+          ffmpeg -hide_banner -version
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Command works when installed
