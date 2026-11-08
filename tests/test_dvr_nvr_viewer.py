@@ -85,20 +85,40 @@ class Arguments(unittest.TestCase):
                 app.parse_channels(bad)
 
     def test_brand_urls(self):
+        # (full quality, lighter) for channel 3, as each vendor documents it
         cases = {
-            "dahua": "rtsp://admin:p%40ss@10.0.0.5:554/cam/realmonitor?channel=3&subtype=1",
-            "hikvision": "rtsp://admin:p%40ss@10.0.0.5:554/Streaming/Channels/302",
-            "xmeye": "rtsp://10.0.0.5:554/user=admin&password=p%40ss&channel=3&stream=1.sdp",
+            "dahua": ("/cam/realmonitor?channel=3&subtype=0", "/cam/realmonitor?channel=3&subtype=1"),
+            "hikvision": ("/Streaming/Channels/301", "/Streaming/Channels/302"),
+            "hikvision-legacy": ("/h264/ch3/main/av_stream", "/h264/ch3/sub/av_stream"),
+            "tplink-nvr": ("/live/3/1/avm", "/live/3/2/avm"),
+            "tplink-camera": ("/stream1", "/stream2"),
+            "reolink": ("/Preview_03_main", "/Preview_03_sub"),
+            "uniview": ("/unicast/c3/s0/live", "/unicast/c3/s1/live"),
+            "hanwha": ("/LiveChannel/2/media.smp", "/LiveChannel/2/media.smp"),
+            "axis": ("/axis-media/media.amp?camera=3", "/axis-media/media.amp?camera=3"),
+            "bosch": ("/?line=3&inst=1", "/?line=3&inst=2"),
+            "milesight": ("/main", "/sub"),
+            "foscam": ("/videoMain", "/videoSub"),
+            "xmeye": ("/user=admin&password=p%40ss&channel=3&stream=0.sdp",
+                      "/user=admin&password=p%40ss&channel=3&stream=1.sdp"),
         }
-        for brand, expected in cases.items():
-            args = parse("--ip", "10.0.0.5", "--user", "admin", "--brand", brand, "3")
-            self.assertEqual(app.source(args, "p@ss", 3, sub=1)[-1], expected, brand)
-        main = parse("--ip", "10.0.0.5", "--user", "admin", "--brand", "hikvision")
-        self.assertTrue(app.source(main, "x", 2, sub=0)[-1].endswith("/Streaming/Channels/201"))
+        self.assertEqual(sorted(cases), sorted(app.BRANDS), "every brand needs a test case")
+        for brand, (full, light) in cases.items():
+            args = parse("--ip", "10.0.0.5", "--user", "admin", "--brand", brand)
+            port = app.BRAND_HINTS[brand]["port"]
+            prefix = f"rtsp://10.0.0.5:{port}" if brand == "xmeye" else f"rtsp://admin:p%40ss@10.0.0.5:{port}"
+            self.assertEqual(app.source(args, "p@ss", 3, sub=0)[-1], prefix + full, brand)
+            self.assertEqual(app.source(args, "p@ss", 3, sub=1)[-1], prefix + light, brand)
+
+    def test_brand_ports(self):
+        self.assertEqual(parse("--ip", "x", "--brand", "foscam").port, 88)
+        self.assertEqual(parse("--ip", "x", "--brand", "foscam", "--port", "554").port, 554)
+        self.assertEqual(parse("--ip", "x").port, 554)
 
     def test_custom_template(self):
-        args = parse("--ip", "10.0.0.5", "--user", "u", "--url-template", "rtsp://{ip}/live{channel}_{stream}")
-        self.assertEqual(app.source(args, "pw", 4, sub=0)[-1], "rtsp://10.0.0.5/live4_1")
+        args = parse("--ip", "10.0.0.5", "--user", "u", "--url-template",
+                     "rtsp://{ip}/live{channel}_{stream}/{channel0}/{channel:02d}/{quality}/{Quality}")
+        self.assertEqual(app.source(args, "pw", 4, sub=0)[-1], "rtsp://10.0.0.5/live4_1/3/04/main/Main")
 
 
 class Helpers(unittest.TestCase):
@@ -329,6 +349,15 @@ class BrowserSetup(unittest.TestCase):
         code, url, body = self.post(opener, self.form(token, channels="1-4", password=""))
         self.assertEqual(self.page_config(body)["channels"], [1, 2, 3, 4])
 
+    def test_custom_address_is_checked(self):
+        opener, token = self.admin()
+        code, _, body = self.post(opener, self.form(token, brand="custom", password="right-pw",
+                                                    url_template="rtsp://{ip}:{port}/{nonsense}"))
+        self.assertIn("unknown placeholder", body)
+        code, url, body = self.post(opener, self.form(token, brand="custom", password="right-pw", channels="1",
+                                                      url_template="rtsp://{user}:{password}@{ip}:{port}/live"))
+        self.assertEqual(self.page_config(body)["channels"], [1])
+
     def test_not_remembering_the_password(self):
         opener, token = self.admin()
         form = self.form(token, password="right-pw")
@@ -348,6 +377,9 @@ class Installer(unittest.TestCase):
 
     def test_syntax(self):
         subprocess.run(["bash", "-n", SETUP], check=True)
+
+    def test_brand_list_matches_the_app(self):
+        self.assertEqual(self.bash('printf "%s" "$BRANDS"').split(), list(app.BRANDS))
 
     def test_driver_choice(self):
         drivers = "\n".join([

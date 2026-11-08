@@ -21,6 +21,8 @@ say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m!! %s\033[0m\n' "$*"; }
 
 do_cameras=1; do_printer=0
+# camera address styles, as in dvr_nvr_viewer.py --brand (the tests check these stay in sync)
+BRANDS="dahua hikvision hikvision-legacy tplink-nvr tplink-camera reolink uniview hanwha axis bosch milesight foscam xmeye"
 
 install_packages() {
   local pkgs=()
@@ -43,7 +45,7 @@ load_env() { # read our settings back as plain text; never run the file as shell
     k=${line%%=*}; v=${line#*=}
     v=${v#\"}; v=${v%\"}
     v=${v//\\\\/$'\001'}; v=${v//\\\"/\"}; v=${v//$'\001'/\\}
-    case $k in DVR_IP|DVR_BRAND|DVR_USER|DVR_PASS|DVR_CHANNELS|WEB_PORT) printf -v "$k" '%s' "$v" ;; esac
+    case $k in DVR_IP|DVR_BRAND|DVR_PORT|DVR_USER|DVR_PASS|DVR_CHANNELS|WEB_PORT) printf -v "$k" '%s' "$v" ;; esac
   done < "$1"
 }
 
@@ -51,18 +53,21 @@ setup_cameras() {
   [ -f "$REPO/dvr_nvr_viewer.py" ] || { echo "dvr_nvr_viewer.py not found in $REPO"; exit 1; }
 
   # keep earlier answers as defaults when re-running
-  local DVR_IP="" DVR_BRAND=dahua DVR_USER="" DVR_CHANNELS="1 2 3 4" WEB_PORT=8080 DVR_PASS=""
+  local DVR_IP="" DVR_BRAND=dahua DVR_PORT="" DVR_USER="" DVR_CHANNELS="1 2 3 4" WEB_PORT=8080 DVR_PASS=""
   if [ -f "$ENV_FILE" ]; then load_env "$ENV_FILE"; fi
 
   say "DVR camera viewer"
   read -r -p "DVR/NVR address${DVR_IP:+ [$DVR_IP]}: " v;  DVR_IP=${v:-$DVR_IP}
-  read -r -p "Brand: dahua, hikvision or xmeye [$DVR_BRAND]: " v; DVR_BRAND=${v:-$DVR_BRAND}
+  echo "Brands: $BRANDS"
+  read -r -p "Brand [$DVR_BRAND]: " v; DVR_BRAND=${v:-$DVR_BRAND}
+  read -r -p "RTSP port${DVR_PORT:+ [$DVR_PORT]} (Enter = the brand's usual port): " v; DVR_PORT=${v:-$DVR_PORT}
   read -r -p "DVR username${DVR_USER:+ [$DVR_USER]}: " v; DVR_USER=${v:-$DVR_USER}
   read -r -s -p "DVR password${DVR_PASS:+ (Enter = keep current)}: " v; echo; DVR_PASS=${v:-$DVR_PASS}
   read -r -p "Camera channels [$DVR_CHANNELS]: " v;  DVR_CHANNELS=${v:-$DVR_CHANNELS}
   read -r -p "Web page port [$WEB_PORT]: " v;        WEB_PORT=${v:-$WEB_PORT}
   [ -n "$DVR_IP" ] && [ -n "$DVR_USER" ] && [ -n "$DVR_PASS" ] || { echo "Address, username and password are required."; exit 1; }
-  case $DVR_BRAND in dahua|hikvision|xmeye) ;; *) echo "Unknown brand: $DVR_BRAND"; exit 1 ;; esac
+  if [ -n "$DVR_PORT" ] && ! [[ $DVR_PORT =~ ^[0-9]+$ ]]; then echo "The RTSP port is a number"; exit 1; fi
+  case " $BRANDS " in *" $DVR_BRAND "*) ;; *) echo "Unknown brand: $DVR_BRAND (choose one of: $BRANDS)"; exit 1 ;; esac
 
   id "$APP_USER" &>/dev/null || useradd --system --home-dir "$APP_HOME" --create-home --shell /usr/sbin/nologin "$APP_USER"
   install -d -m 755 "$APP_DIR"
@@ -73,6 +78,7 @@ setup_cameras() {
   {
     echo "DVR_IP=$(env_quote "$DVR_IP")"
     echo "DVR_BRAND=$(env_quote "$DVR_BRAND")"
+    echo "DVR_PORT=$(env_quote "$DVR_PORT")"
     echo "DVR_USER=$(env_quote "$DVR_USER")"
     echo "DVR_PASS=$(env_quote "$DVR_PASS")"
     echo "DVR_CHANNELS=$(env_quote "$DVR_CHANNELS")"

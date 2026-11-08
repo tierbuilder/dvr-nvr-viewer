@@ -50,19 +50,43 @@ Try it without a DVR: `dvr-nvr-viewer --test 1 2 3 4` shows fake video.
 
 ## Camera brands
 
-| `--brand` | For | Status |
-|---|---|---|
-| `dahua` (default) | Dahua and rebrands (Amcrest, Lorex, CP Plus, ...) | Tested |
-| `hikvision` | Hikvision and rebrands (HiLook, Annke, ...) | Untested, please report |
-| `xmeye` | XMEye / NetSurveillance DVRs | Untested, please report |
+Pick the brand on the setup page, or use `--brand` on the command line. Many DVRs are sold under other names but use the same software as one of these, so try the matching family.
 
-Anything else: give the RTSP address yourself with `--url-template`, using these placeholders: `{user} {password} {ip} {port} {channel}`, plus `{sub}` (0 = full quality, 1 = lighter) or `{stream}` (1 = full quality, 2 = lighter). For example:
+| `--brand` | For | Address format from | Notes |
+|---|---|---|---|
+| `dahua` (default) | Dahua, Amcrest, Lorex, CP Plus, IMOU and other Dahua-based | Vendor docs | **Tested on real hardware** |
+| `hikvision` | Hikvision, HiLook, HiWatch, Annke and other Hikvision-based | Vendor docs | |
+| `hikvision-legacy` | EZVIZ, older Hikvision | Community | EZVIZ: user `admin`, password = 6-letter code on the label; turn on LAN Live View |
+| `tplink-nvr` | TP-Link VIGI NVR | Vendor docs | Turn off SRTP on the NVR |
+| `tplink-camera` | TP-Link Tapo and VIGI cameras | Vendor docs | Single camera (use `1`); Tapo needs a camera account made in the app |
+| `reolink` | Reolink NVRs and cameras | Vendor docs | |
+| `uniview` | Uniview (UNV) NVRs | Vendor docs | |
+| `hanwha` | Hanwha Vision, Wisenet, Samsung NVRs | Vendor docs | One stream per camera |
+| `axis` | Axis cameras and encoders | Vendor docs | One stream per camera |
+| `bosch` | Bosch cameras | Vendor docs | Single camera (`1`); multi-imager cameras `1-4` |
+| `milesight` | Milesight cameras | Vendor docs | Single camera (use `1`) |
+| `foscam` | Foscam cameras | Vendor docs | Single camera (use `1`); port is usually 88 |
+| `xmeye` | XMEye / NetSurveillance and many generic DVRs | Community | |
+
+Only Dahua has been tested on real hardware so far. If yours works (or doesn't), please open an issue.
+
+Anything else: choose **Other** on the setup page (or use `--url-template`) and enter the camera's RTSP address with these placeholders:
+
+| Placeholder | Becomes |
+|---|---|
+| `{user}` `{password}` `{ip}` `{port}` | Your login and the DVR's address |
+| `{channel}` | Camera number from 1; `{channel0}` counts from 0; `{channel:02d}` is zero-padded (`01`) |
+| `{sub}` | `0` = full quality, `1` = lighter |
+| `{stream}` | `1` = full quality, `2` = lighter |
+| `{quality}` / `{Quality}` | `main` / `sub`, or `Main` / `Sub` |
+
+For example:
 
 ```bash
 dvr-nvr-viewer --ip 192.168.1.64 --url-template "rtsp://{user}:{password}@{ip}:{port}/ch{channel}/{stream}" 1 2 3 4
 ```
 
-If your DVR works with a template that isn't listed here, please open an issue so it can become a `--brand`.
+Single cameras on different IP addresses can't be combined in one view yet; each run shows the cameras of one device.
 
 ## Options
 
@@ -78,10 +102,10 @@ If your DVR works with a template that isn't listed here, please open an issue s
 | `--web-key KEY` | Choose the access key (default: random, saved in `~/.dvr_nvr_viewer_web_key`) |
 | `--no-browser` | Don't open the page automatically |
 | `--no-local-admin` | Require the admin link for settings even on this computer (for shared computers) |
-| `--port N` | The DVR's RTSP port (default 554) |
+| `--port N` | The DVR's RTSP port (default: the brand's usual one, mostly 554) |
 | `--test` | Fake video, no DVR needed |
 
-Environment variables `DVR_IP`, `DVR_USER`, `DVR_PASS`, `DVR_SUB` and `DVR_WEB_KEY` work too, which is handy for services.
+Environment variables `DVR_IP`, `DVR_PORT`, `DVR_USER`, `DVR_PASS`, `DVR_SUB` and `DVR_WEB_KEY` work too, which is handy for services.
 
 On the page: **L** cycles layouts, **1–9** shows that channel alone, **← →** change page or camera, **Esc** goes back.
 

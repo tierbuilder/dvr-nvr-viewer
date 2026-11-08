@@ -32,8 +32,8 @@ Examples:
   dvr-nvr-viewer --ip 192.168.1.64 --brand hikvision 1 2 3 4
   dvr-nvr-viewer --test 1 2 3 4                             (fake video, checks ffmpeg works)
 
-Settings can also come from env vars: DVR_IP, DVR_USER, DVR_PASS, DVR_SUB, DVR_WEB_KEY.
---brand picks the camera address style (dahua, hikvision, xmeye); --url-template handles anything else.
+Settings can also come from env vars: DVR_IP, DVR_PORT, DVR_USER, DVR_PASS, DVR_SUB, DVR_WEB_KEY.
+--brand picks the camera address style (see --help for the list); --url-template handles anything else.
 Stop it with Ctrl+C.
 """
 import argparse
@@ -54,16 +54,50 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 __version__ = "0.2.0"
 
-# RTSP address styles. {sub} is 0 for the full-quality stream, 1 for the lighter one;
-# {stream} is the same thing counted from 1 (1 = full quality, 2 = lighter).
-BRANDS = {
-    # Dahua and its many rebrands (Amcrest, Lorex, CP Plus, ...): tested
-    "dahua": "rtsp://{user}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype={sub}",
-    # Hikvision and rebrands (HiLook, Annke, ...)
-    "hikvision": "rtsp://{user}:{password}@{ip}:{port}/Streaming/Channels/{channel}0{stream}",
-    # XMEye / "NetSurveillance" based DVRs
-    "xmeye": "rtsp://{ip}:{port}/user={user}&password={password}&channel={channel}&stream={sub}.sdp",
-}
+# RTSP address styles. Placeholders: {user} {password} {ip} {port}; {channel} counts from 1, {channel0}
+# from 0, and {channel:02d} is zero-padded (01, 02, ...). For the quality: {sub} is 0 = full quality /
+# 1 = lighter, {stream} is 1 = full / 2 = lighter, {quality} is main / sub and {Quality} is Main / Sub.
+# Formats come from each vendor's documentation; only Dahua has been tested with real hardware so far.
+BRAND_LIST = [
+    # key, label, address, usual RTSP port, hint shown on the setup page
+    ("dahua", "Dahua / Amcrest / Lorex / CP Plus / IMOU",
+     "rtsp://{user}:{password}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype={sub}", 554,
+     "DVRs, NVRs and cameras. Tested."),
+    ("hikvision", "Hikvision / HiLook / HiWatch / Annke",
+     "rtsp://{user}:{password}@{ip}:{port}/Streaming/Channels/{channel}0{stream}", 554,
+     "DVRs, NVRs and cameras."),
+    ("hikvision-legacy", "EZVIZ / older Hikvision",
+     "rtsp://{user}:{password}@{ip}:{port}/h264/ch{channel}/{quality}/av_stream", 554,
+     "EZVIZ: user admin, password = the 6-letter verification code on the label; turn on LAN Live View in the app."),
+    ("tplink-nvr", "TP-Link VIGI NVR",
+     "rtsp://{user}:{password}@{ip}:{port}/live/{channel}/{stream}/avm", 554,
+     "Turn off SRTP on the NVR, or other apps can't receive its video."),
+    ("tplink-camera", "TP-Link Tapo / VIGI camera",
+     "rtsp://{user}:{password}@{ip}:{port}/stream{stream}", 554,
+     "Single camera: use camera 1. Tapo needs a camera account made in the Tapo app (not your Tapo login)."),
+    ("reolink", "Reolink NVR / camera",
+     "rtsp://{user}:{password}@{ip}:{port}/Preview_{channel:02d}_{quality}", 554,
+     "On a camera on its own, use camera 1. Avoid special characters in the password."),
+    ("uniview", "Uniview (UNV) NVR",
+     "rtsp://{user}:{password}@{ip}:{port}/unicast/c{channel}/s{sub}/live", 554, "NVRs."),
+    ("hanwha", "Hanwha / Wisenet / Samsung NVR",
+     "rtsp://{user}:{password}@{ip}:{port}/LiveChannel/{channel0}/media.smp", 554,
+     "NVRs; one stream per camera. If it doesn't connect, the RTSP port may be the NVR's last device port."),
+    ("axis", "Axis camera / encoder",
+     "rtsp://{user}:{password}@{ip}:{port}/axis-media/media.amp?camera={channel}", 554,
+     "One stream per camera; for encoders the camera number is the video input."),
+    ("bosch", "Bosch camera",
+     "rtsp://{user}:{password}@{ip}:{port}/?line={channel}&inst={stream}", 554,
+     "Single camera: use camera 1 (multi-imager cameras: 1-4). RTSP must be enabled on the camera."),
+    ("milesight", "Milesight camera",
+     "rtsp://{user}:{password}@{ip}:{port}/{quality}", 554, "Single camera: use camera 1."),
+    ("foscam", "Foscam camera",
+     "rtsp://{user}:{password}@{ip}:{port}/video{Quality}", 88,
+     "Single camera: use camera 1. The RTSP port is usually the web port, 88 (some models use 554)."),
+    ("xmeye", "XMEye / NetSurveillance / generic Chinese DVR",
+     "rtsp://{ip}:{port}/user={user}&password={password}&channel={channel}&stream={sub}.sdp", 554, "DVRs and NVRs."),
+]
+BRANDS = {key: url for key, _, url, _, _ in BRAND_LIST}
 LOW_LATENCY = ["-fflags", "nobuffer", "-flags", "low_delay"]
 STALE_AFTER = 5     # seconds without a frame before a tile is marked as having no video
 RETRY_AFTER = 3     # seconds to wait before reconnecting a camera that dropped
@@ -78,16 +112,17 @@ def parse_args():
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--ip", default=os.environ.get("DVR_IP"),
                    help="DVR/NVR address, e.g. 192.168.1.64 (or leave it out and set it up in the browser)")
-    p.add_argument("--brand", default="dahua", choices=sorted(BRANDS),
+    p.add_argument("--brand", default="dahua", choices=list(BRANDS),
                    help="camera address style (default dahua); use --url-template for others")
-    p.add_argument("--port", type=int, default=554, help="the DVR's RTSP port (default 554)")
+    p.add_argument("--port", type=int, help="the DVR's RTSP port (default: the brand's usual one, mostly 554)")
     p.add_argument("--user", default=os.environ.get("DVR_USER"), help="DVR username (asked if not given)")
     p.add_argument("--main", action="store_true",
                    help="full quality for every tile (default: only big tiles; small ones use the lighter stream)")
     p.add_argument("--layout", choices=LAYOUT_CHOICES,
                    help="starting layout (default: grid, or whatever the browser last used)")
     p.add_argument("--url-template",
-                   help="custom RTSP URL with {user} {password} {ip} {port} {channel} {sub} {stream} placeholders")
+                   help="custom RTSP URL; placeholders {user} {password} {ip} {port} {channel} {channel0} "
+                        "{channel:02d} {sub} {stream} {quality} {Quality} (see the README)")
     p.add_argument("--web-port", type=int, default=8080, help="web page port (default 8080, or the next free one)")
     p.add_argument("--web-key", default=os.environ.get("DVR_WEB_KEY"),
                    help="access key for the page (default: a random key, saved so links keep working)")
@@ -99,6 +134,9 @@ def parse_args():
     p.add_argument("--test", action="store_true", help="use fake test video instead of the DVR")
     args = p.parse_args()
     args.url_template = args.url_template or BRANDS[args.brand]
+    if args.port is None:
+        env_port = os.environ.get("DVR_PORT", "").strip()
+        args.port = int(env_port) if env_port.isdigit() else BRAND_HINTS[args.brand]["port"]
     return args
 
 
@@ -114,7 +152,8 @@ def source(args, password, ch, sub=None):
     if sub is None:
         sub = 0 if args.main else default_sub()
     url = args.url_template.format(user=quote(args.user or "", safe=""), password=quote(password, safe=""),
-                                   ip=args.ip, port=args.port, channel=ch, sub=sub, stream=sub + 1)
+                                   ip=args.ip, port=args.port, channel=ch, channel0=ch - 1, sub=sub, stream=sub + 1,
+                                   quality="sub" if sub else "main", Quality="Sub" if sub else "Main")
     # give up on a camera that sends nothing for 10s, so it reconnects instead of hanging forever
     return ["-rtsp_transport", "tcp", "-timeout", "10000000", *LOW_LATENCY, url]
 
@@ -218,8 +257,10 @@ WEB_FPS = 15        # most frames per second sent to each browser
 KEY_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer_web_key")
 ADMIN_KEY_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer_admin_key")
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer.json")  # settings made on the setup page
-BRAND_LABELS = [("dahua", "Dahua (Amcrest, Lorex, CP Plus, ...)"), ("hikvision", "Hikvision (HiLook, Annke, ...)"),
-                ("xmeye", "XMEye / NetSurveillance"), ("custom", "Other: enter the RTSP address")]
+BRAND_LABELS = [(key, label) for key, label, _, _, _ in BRAND_LIST] + [("custom", "Other: enter the RTSP address")]
+# per-brand port and hint for the setup page
+BRAND_HINTS = {key: {"port": port, "hint": hint} for key, _, _, port, hint in BRAND_LIST}
+BRAND_HINTS["custom"] = {"port": 554, "hint": "Any camera with an RTSP address; see the placeholders below."}
 
 
 class JpegSource:
@@ -453,8 +494,11 @@ def run_server(args, cfg, password, draft=None):
             return bool(given) and hmac.compare_digest(given.encode(), key.encode())
 
         def is_admin(self, query):
-            # the computer running this is trusted; other devices need the admin link
-            local = self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+            # the computer running this is trusted; other devices need the admin link. A browser on this
+            # computer may connect through its network address, so a visitor whose address is the one
+            # it connected to (ours) is this computer too.
+            client = self.client_address[0]
+            local = client in ("127.0.0.1", "::1", "::ffff:127.0.0.1") or client == self.connection.getsockname()[0]
             return ((local and not args.no_local_admin)
                     or self.matches(query.get("admin", [""])[0] or self.cookie("dvradmin"), admin_key))
 
@@ -544,6 +588,7 @@ def run_server(args, cfg, password, draft=None):
                 "__TOKEN__": form_token, "__IP__": html.escape(v["ip"]), "__PORT__": html.escape(v["port"]),
                 "__USER__": html.escape(v["user"]), "__CHANNELS__": html.escape(v["channels"]),
                 "__TEMPLATE__": html.escape(v["url_template"]), "__BRANDS__": options,
+                "__HINTS__": json.dumps(BRAND_HINTS),
                 "__PW_HINT__": "leave empty to keep the current one" if have_password else "",
                 "__MAIN__": " checked" if v["main"] else "", "__REMEMBER__": " checked" if v["remember"] else "",
                 "__BACK__": '<a href="/">Back to the cameras</a>' if cfg is not None else "",
@@ -599,8 +644,14 @@ def run_server(args, cfg, password, draft=None):
                 raise ValueError("Enter the DVR's address, like 192.168.1.64")
             if v["brand"] not in BRANDS and v["brand"] != "custom":
                 raise ValueError("Pick the DVR brand")
-            if v["brand"] == "custom" and not (v["url_template"].startswith("rtsp://") and "{channel}" in v["url_template"]):
-                raise ValueError("A custom address must start with rtsp:// and contain {channel}")
+            if v["brand"] == "custom":
+                if not v["url_template"].startswith(("rtsp://", "rtsps://")):
+                    raise ValueError("A custom address must start with rtsp://")
+                try:
+                    source(SimpleNamespace(test=False, main=False, url_template=v["url_template"], user="u",
+                                           ip="x", port=554), "p", 1)
+                except (KeyError, IndexError, ValueError) as e:
+                    raise ValueError(f"The custom address has an unknown placeholder or a stray brace: {e}")
             if not v["port"].isdigit() or not 1 <= int(v["port"]) <= 65535:
                 raise ValueError("The RTSP port is a number, usually 554")
             if not v["user"] or len(v["user"]) > 64:
@@ -611,6 +662,8 @@ def run_server(args, cfg, password, draft=None):
                 cfg, _ = snapshot()
                 same_dvr = (cfg is not None and not cfg.test and state["password"] and cfg.ip == new.ip
                             and cfg.port == new.port and cfg.user == new.user and cfg.url_template == new.url_template)
+                if not state["password"] or cfg is None or cfg.test:
+                    raise ValueError("Enter the password")
                 if not same_dvr:
                     # never send a kept password to a different address or account
                     raise ValueError("Enter the password (the saved one is only reused for the same DVR and user)")
@@ -711,6 +764,7 @@ PAGE_STYLE = r"""
   label { display: block; font-weight: 600; margin: 14px 0 4px; }
   label:first-child { margin-top: 0; }
   .hint { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+  #brandhint { margin-top: 6px; }
   input[type=text], input[type=password], select { width: 100%; padding: 10px 12px; font: inherit;
     color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 6px; }
   input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -753,9 +807,11 @@ __ERROR__
   </div>
   <label for="brand">Brand</label>
   <select id="brand" name="brand">__BRANDS__</select>
+  <span class="hint" id="brandhint"></span>
   <div id="tpl" class="hidden">
-    <label for="url_template">RTSP address <span class="hint">placeholders: {user} {password} {ip} {port}
-      {channel}, and {sub} (0 = full quality, 1 = lighter) or {stream} (1 = full, 2 = lighter)</span></label>
+    <label for="url_template">RTSP address <span class="hint">placeholders: {user} {password} {ip} {port};
+      {channel} (from 1), {channel0} (from 0) or {channel:02d} (01, 02, ...); quality as {sub} (0 = full,
+      1 = lighter), {stream} (1 = full, 2 = lighter), {quality} (main / sub) or {Quality} (Main / Sub)</span></label>
     <input type="text" id="url_template" name="url_template" value="__TEMPLATE__" autocomplete="off"
       placeholder="rtsp://{user}:{password}@{ip}:{port}/ch{channel}/{stream}">
   </div>
@@ -778,9 +834,19 @@ __ERROR__
   Admin link (to change these settings from another device; keep it private): <code>__ADMIN__</code>
 </div>
 <script>
+const HINTS = __HINTS__;
 const brand = document.getElementById("brand"), tpl = document.getElementById("tpl");
-function showTemplate() { tpl.classList.toggle("hidden", brand.value !== "custom"); }
-brand.addEventListener("change", showTemplate); showTemplate();
+const port = document.getElementById("port"), hint = document.getElementById("brandhint");
+let shown = brand.value;
+function showBrand() {
+  tpl.classList.toggle("hidden", brand.value !== "custom");
+  hint.textContent = (HINTS[brand.value] || {}).hint || "";
+  // follow the brand's usual port, unless a different port was typed in
+  const before = (HINTS[shown] || {}).port, after = (HINTS[brand.value] || {}).port;
+  if (after && (port.value === "" || String(before) === port.value)) port.value = after;
+  shown = brand.value;
+}
+brand.addEventListener("change", showBrand); showBrand();
 document.getElementById("f").addEventListener("submit", () => {
   const b = document.getElementById("go"); b.disabled = true; b.textContent = "Checking the login…";
 });
