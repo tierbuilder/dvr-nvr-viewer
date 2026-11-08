@@ -15,6 +15,7 @@ import threading
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from unittest import mock
 
@@ -37,13 +38,51 @@ def free_port():
         return s.getsockname()[1]
 
 
+def start_app(*argv, env=None):
+    """Start the real app; returns (process, log file, base URL). Raises with the app's output if it doesn't start."""
+    port = free_port()
+    log = tempfile.TemporaryFile()
+    proc = subprocess.Popen([sys.executable, "-u", SCRIPT, *argv, "--no-browser", "--bind", "127.0.0.1",
+                             "--web-port", str(port)], stdout=log, stderr=subprocess.STDOUT, env=env)
+    deadline = time.time() + 60  # CI machines can be slow the first time a program runs
+    while time.time() < deadline and proc.poll() is None:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+            return proc, log, f"http://127.0.0.1:{port}"
+        except OSError:
+            time.sleep(0.2)
+    exited = proc.poll()
+    proc.kill()
+    proc.wait()
+    log.seek(0)
+    output = log.read().decode(errors="replace")
+    log.close()
+    state = f"exited with code {exited}" if exited is not None else "still not listening after 60s"
+    raise RuntimeError(f"server didn't start ({state}). Its output:\n{output}")
+
+
+def stop_app(proc, log):
+    proc.terminate()
+    try:
+        proc.wait(10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    log.close()
+
+
 class Arguments(unittest.TestCase):
-    def test_ip_is_required_unless_testing(self):
+    def test_ip_is_optional(self):
+        # without --ip the DVR is set up in the browser
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("DVR_IP", None)
-            with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
-                parse("1", "2")
-        self.assertTrue(parse("--test").test)
+            self.assertIsNone(parse("1", "2").ip)
+
+    def test_channel_lists(self):
+        self.assertEqual(app.parse_channels("1-3 5"), [1, 2, 3, 5])
+        self.assertEqual(app.parse_channels("4,2,4"), [4, 2])
+        for bad in ("", "x", "0", "65", "1-40"):
+            with self.assertRaises(ValueError, msg=bad):
+                app.parse_channels(bad)
 
     def test_brand_urls(self):
         cases = {
@@ -137,39 +176,13 @@ class WebServer(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.port = free_port()
-        # keep the app's own output, so a failure to start explains itself
-        cls.log = tempfile.TemporaryFile()
-        cls.proc = subprocess.Popen(
-            [sys.executable, "-u", SCRIPT, "1", "2", "4", "--test", "--no-browser", "--bind", "127.0.0.1",
-             "--web-port", str(cls.port), "--web-key", "testkey", "--layout", "1+5"],
-            stdout=cls.log, stderr=subprocess.STDOUT)
-        deadline = time.time() + 60  # CI machines can be slow the first time a program runs
-        while time.time() < deadline and cls.proc.poll() is None:
-            try:
-                socket.create_connection(("127.0.0.1", cls.port), timeout=1).close()
-                break
-            except OSError:
-                time.sleep(0.2)
-        else:
-            exited = cls.proc.poll()
-            cls.proc.kill()
-            cls.proc.wait()
-            cls.log.seek(0)
-            output = cls.log.read().decode(errors="replace")
-            cls.log.close()
-            state = f"exited with code {exited}" if exited is not None else "still not listening after 60s"
-            raise RuntimeError(f"server didn't start ({state}). Its output:\n{output}")
-        cls.base = f"http://127.0.0.1:{cls.port}"
+        # --no-local-admin: these requests come from this computer, which would otherwise count as admin
+        cls.proc, cls.log, cls.base = start_app("1", "2", "4", "--test", "--web-key", "testkey", "--layout", "1+5",
+                                                "--no-local-admin")
 
     @classmethod
     def tearDownClass(cls):
-        cls.proc.terminate()
-        try:
-            cls.proc.wait(10)
-        except subprocess.TimeoutExpired:
-            cls.proc.kill()
-        cls.log.close()
+        stop_app(cls.proc, cls.log)
 
     def browser(self):
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -210,6 +223,119 @@ class WebServer(unittest.TestCase):
         info = json.loads(opener.open(self.base + "/status/all", timeout=10).read())
         self.assertEqual(sorted(info), ["1", "2", "4"])
         self.assertEqual(self.status(self.base + "/stream/3/sub", opener), 404)
+
+
+@unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
+class BrowserSetup(unittest.TestCase):
+    """Setting up the DVR from the browser, against a fake DVR, with a throwaway home folder."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
+        self.env.pop("DVR_IP", None)
+        self.dvr = FakeDvr("admin", "right-pw")
+        self.addCleanup(self.dvr.close)
+        self.start()
+
+    def start(self):
+        # --no-local-admin: these requests come from this computer, which would otherwise count as admin
+        self.proc, self.log, self.base = start_app("--no-local-admin", "--web-key", "viewkey", env=self.env)
+        self.addCleanup(stop_app, self.proc, self.log)
+        with open(os.path.join(self.home, ".dvr_nvr_viewer_admin_key")) as f:
+            self.admin_key = f.read().strip()
+
+    def opener(self):
+        return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+    def get(self, opener, path):
+        try:
+            r = opener.open(self.base + path, timeout=20)
+            return r.status, r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode()
+
+    def post(self, opener, form):
+        req = urllib.request.Request(self.base + "/setup", urllib.parse.urlencode(form).encode())
+        try:
+            r = opener.open(req, timeout=60)
+            return r.status, r.geturl(), r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, "", e.read().decode()
+
+    def admin(self):
+        opener = self.opener()
+        code, body = self.get(opener, f"/?admin={self.admin_key}")
+        self.assertEqual(code, 200)
+        token = body.split('name="token" value="', 1)[1].split('"', 1)[0]
+        return opener, token
+
+    def form(self, token, **changes):
+        form = {"token": token, "ip": "127.0.0.1", "port": str(self.dvr.port), "brand": "dahua", "user": "admin",
+                "channels": "1-3 5", "remember": "on"}
+        form.update(changes)
+        return form
+
+    @staticmethod
+    def page_config(body):
+        return json.loads(body.split("const CFG = ", 1)[1].split(";\n", 1)[0])
+
+    def test_only_admins_can_change_settings(self):
+        viewer = self.opener()
+        code, body = self.get(viewer, "/?key=viewkey")
+        self.assertIn("Not set up yet", body)
+        self.assertEqual(self.get(viewer, "/setup")[0], 403)
+        self.assertEqual(self.get(self.opener(), "/?admin=wrong")[0], 403)
+        opener, token = self.admin()
+        # a form that didn't come from our own page (no token) is refused
+        self.assertEqual(self.post(opener, self.form("forged", password="right-pw"))[0], 403)
+        self.assertEqual(self.post(viewer, self.form(token, password="right-pw"))[0], 403)
+
+    def test_wrong_password_is_reported_and_not_saved(self):
+        opener, token = self.admin()
+        code, _, body = self.post(opener, self.form(token, password="WRONG"))
+        self.assertIn("rejected this username or password", body)
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".dvr_nvr_viewer.json")))
+
+    def test_setup_connects_saves_and_survives_restart(self):
+        opener, token = self.admin()
+        code, url, body = self.post(opener, self.form(token, password="right-pw"))
+        self.assertTrue(url.endswith("/"), url)
+        self.assertEqual(self.page_config(body)["channels"], [1, 2, 3, 5])
+        self.assertTrue(self.page_config(body)["admin"])
+        viewer = self.opener()
+        self.get(viewer, "/?key=viewkey")
+        code, body = self.get(viewer, "/")
+        self.assertEqual(self.page_config(body)["channels"], [1, 2, 3, 5])
+        self.assertFalse(self.page_config(body)["admin"])
+        # the password is saved privately and never sent back to a browser
+        saved = os.path.join(self.home, ".dvr_nvr_viewer.json")
+        with open(saved) as f:
+            self.assertEqual(json.load(f)["password"], "right-pw")
+        if sys.platform != "win32":
+            self.assertEqual(os.stat(saved).st_mode & 0o777, 0o600)
+        self.assertNotIn("right-pw", self.get(opener, "/setup")[1])
+        # after a restart it reconnects with the saved settings
+        stop_app(self.proc, self.log)
+        self.start()
+        code, body = self.get(viewer, "/")
+        self.assertEqual(self.page_config(body)["channels"], [1, 2, 3, 5])
+
+    def test_kept_password_is_never_sent_to_another_dvr(self):
+        opener, token = self.admin()
+        self.post(opener, self.form(token, password="right-pw"))
+        code, _, body = self.post(opener, self.form(token, ip="10.9.9.9", password=""))
+        self.assertIn("Enter the password", body)
+        code, url, body = self.post(opener, self.form(token, channels="1-4", password=""))
+        self.assertEqual(self.page_config(body)["channels"], [1, 2, 3, 4])
+
+    def test_not_remembering_the_password(self):
+        opener, token = self.admin()
+        form = self.form(token, password="right-pw")
+        del form["remember"]
+        self.post(opener, form)
+        with open(os.path.join(self.home, ".dvr_nvr_viewer.json")) as f:
+            self.assertNotIn("password", json.load(f))
 
 
 @unittest.skipIf(sys.platform == "win32" or not shutil.which("bash"), "installer is for Linux; needs bash")

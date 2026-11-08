@@ -7,6 +7,7 @@ Made for older DVRs whose own web page still asks for an NPAPI / ActiveX plugin 
 <!-- Add a screenshot here: docs/screenshot.png -->
 
 - **Any browser, any device.** Chrome, Safari, Firefox, Edge, on desktop and mobile.
+- **Set up in the browser.** Enter the DVR's address, brand, username and password on a setup page. No command line needed.
 - **Layouts:** grid, 2×2, 3×3, 1 big + 5, 1 big + 7, single camera. Tap a camera to make it big, double-tap for just that camera.
 - **Each camera is independent.** A slow or stuck camera only freezes its own tile; the others keep playing live, and it reconnects on its own.
 - **Kind to old DVRs.** Cameras are streamed only while someone is watching, small tiles use the lighter stream, and a rejected password is never retried (DVRs lock the account after a few wrong tries).
@@ -31,13 +32,19 @@ Made for older DVRs whose own web page still asks for an NPAPI / ActiveX plugin 
 
    Or just download `dvr_nvr_viewer.py` and run it with `python3 dvr_nvr_viewer.py ...`.
 
-3. Run it with your DVR's address and the channels you want:
+3. Run it:
 
    ```bash
-   dvr-nvr-viewer --ip 192.168.1.64 1 2 3 4
+   dvr-nvr-viewer
    ```
 
-   It asks for the DVR username and password, checks them once, and opens the cameras in your browser. It also prints a link like `http://192.168.1.20:8080/?key=...`: open that on any other device on your network.
+   Your browser opens a setup page: enter the DVR's address, brand, username, password and camera numbers, and click **Save and connect**. The login is checked once; if the DVR rejects it, nothing is retried. The settings are remembered, so next time it connects straight away.
+
+   It also prints two links:
+   - a **watch link** like `http://192.168.1.20:8080/?key=...`: open it on any phone, tablet or computer on your network;
+   - an **admin link** (`...?admin=...`): opens the settings from another device. Keep it to yourself.
+
+   Prefer the command line? `dvr-nvr-viewer --ip 192.168.1.64 --user admin 1 2 3 4` asks for the password in the terminal instead and doesn't save anything.
 
 Try it without a DVR: `dvr-nvr-viewer --test 1 2 3 4` shows fake video.
 
@@ -61,8 +68,8 @@ If your DVR works with a template that isn't listed here, please open an issue s
 
 | Option | |
 |---|---|
-| `--ip ADDRESS` | DVR/NVR address (required) |
-| `--user NAME` | DVR username (asked if not given) |
+| `--ip ADDRESS` | DVR/NVR address. Leave it out to set up in the browser |
+| `--user NAME` | DVR username (asked if not given; with `--ip`) |
 | `--brand NAME` | Address style, see above |
 | `--layout NAME` | Starting layout: `grid`, `2x2`, `3x3`, `1+5`, `1+7`, `single` |
 | `--main` | Full quality for every tile (default: only big tiles) |
@@ -70,6 +77,7 @@ If your DVR works with a template that isn't listed here, please open an issue s
 | `--bind 127.0.0.1` | Only this computer can watch (default: your whole network) |
 | `--web-key KEY` | Choose the access key (default: random, saved in `~/.dvr_nvr_viewer_web_key`) |
 | `--no-browser` | Don't open the page automatically |
+| `--no-local-admin` | Require the admin link for settings even on this computer (for shared computers) |
 | `--port N` | The DVR's RTSP port (default 554) |
 | `--test` | Fake video, no DVR needed |
 
@@ -105,8 +113,10 @@ Each viewer watching 5 small tiles uses roughly 8–10 Mbit/s of network, so use
 
 ## Security
 
+- **Who can do what.** Anyone with the watch link can watch. Changing the DVR settings needs the admin link, or the computer it runs on (turn that off with `--no-local-admin`). The setup form only accepts submissions from its own page, so other websites can't change it behind your back.
+- **The DVR password** is sent from the setup page to the app once and never back to any browser. A saved password is only reused for the same DVR address and username. With "Remember the password" ticked, it's stored in `~/.dvr_nvr_viewer.json`, readable only by your user account. Untick it and you'll be asked again after a restart.
 - **Use it on your home network only.** Don't port-forward it to the internet. It serves plain HTTP, and the access key is the only protection. To watch from outside, use a VPN such as Tailscale or WireGuard.
-- Anyone with the link (including the key) can watch. To revoke all links, delete `~/.dvr_nvr_viewer_web_key` (or `/var/lib/dvr-nvr-viewer/.dvr_nvr_viewer_web_key` for the service) and restart.
+- To revoke all watch links, delete `~/.dvr_nvr_viewer_web_key` and restart. For the admin link, delete `~/.dvr_nvr_viewer_admin_key`. For the service, they're in `/var/lib/dvr-nvr-viewer/`.
 - ffmpeg needs the DVR password inside the camera address, so other user accounts on the same computer can see it in the process list. On a shared computer, prefer a Pi or a dedicated user.
 - Error messages are printed with the password replaced by `****`.
 
@@ -114,7 +124,7 @@ Each viewer watching 5 small tiles uses roughly 8–10 Mbit/s of network, so use
 
 | Problem | Fix |
 |---|---|
-| "The DVR rejected this username/password" | Check them on the DVR's own screen. If they worked before, the account is probably locked after too many wrong tries: wait ~30 minutes or restart the DVR. |
+| "The DVR rejected this username or password" | Check them on the DVR's own screen. If they worked before, the account is probably locked after too many wrong tries: wait ~30 minutes or restart the DVR. |
 | "didn't answer within 15 seconds" | The DVR is busy. Close other viewers (vendor apps, VLC, other copies of this) and wait a minute. Old DVRs only allow a few streams at once. |
 | "No route to host" on macOS | The app running it lacks the Local Network permission: System Settings → Privacy & Security → Local Network. Running it from Terminal usually works. |
 | A tile says "connecting…" forever | That channel may have no camera, or the brand/URL is wrong. Try the address in VLC (Media → Open Network Stream). |

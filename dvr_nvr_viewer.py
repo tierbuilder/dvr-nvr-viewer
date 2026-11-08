@@ -26,6 +26,7 @@ Install ffmpeg:
   Linux:   sudo apt install ffmpeg
 
 Examples:
+  dvr-nvr-viewer                                            (set up the DVR in the browser)
   dvr-nvr-viewer --ip 192.168.1.64 1 2 3 4                  (asks for username and password)
   dvr-nvr-viewer --ip 192.168.1.64 --user admin --layout 1+5 1 2 3 4 5 6
   dvr-nvr-viewer --ip 192.168.1.64 --brand hikvision 1 2 3 4
@@ -38,6 +39,7 @@ Stop it with Ctrl+C.
 import argparse
 import base64
 import getpass
+import json
 import os
 import shutil
 import signal
@@ -47,9 +49,10 @@ import sys
 import threading
 import time
 import webbrowser
+from types import SimpleNamespace
 from urllib.parse import quote, urlsplit, urlunsplit
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # RTSP address styles. {sub} is 0 for the full-quality stream, 1 for the lighter one;
 # {stream} is the same thing counted from 1 (1 = full quality, 2 = lighter).
@@ -73,7 +76,8 @@ def parse_args():
                                 description="Watch several DVR/NVR/IP cameras at once in any web browser.")
     p.add_argument("channels", nargs="*", type=int, default=[1, 2, 3, 4], help="channel numbers (default 1 2 3 4)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    p.add_argument("--ip", default=os.environ.get("DVR_IP"), help="DVR/NVR address, e.g. 192.168.1.64")
+    p.add_argument("--ip", default=os.environ.get("DVR_IP"),
+                   help="DVR/NVR address, e.g. 192.168.1.64 (or leave it out and set it up in the browser)")
     p.add_argument("--brand", default="dahua", choices=sorted(BRANDS),
                    help="camera address style (default dahua); use --url-template for others")
     p.add_argument("--port", type=int, default=554, help="the DVR's RTSP port (default 554)")
@@ -90,10 +94,10 @@ def parse_args():
     p.add_argument("--bind", default="0.0.0.0",
                    help="address to listen on (default: all, so other devices can connect; 127.0.0.1 = this computer only)")
     p.add_argument("--no-browser", action="store_true", help="don't open the page on this computer")
+    p.add_argument("--no-local-admin", action="store_true",
+                   help="require the admin link for settings even on this computer (for shared computers)")
     p.add_argument("--test", action="store_true", help="use fake test video instead of the DVR")
     args = p.parse_args()
-    if not args.ip and not args.test:
-        p.error("--ip is required (the address of your DVR/NVR), or use --test for fake video")
     args.url_template = args.url_template or BRANDS[args.brand]
     return args
 
@@ -113,6 +117,10 @@ def source(args, password, ch, sub=None):
                                    ip=args.ip, port=args.port, channel=ch, sub=sub, stream=sub + 1)
     # give up on a camera that sends nothing for 10s, so it reconnects instead of hanging forever
     return ["-rtsp_transport", "tcp", "-timeout", "10000000", *LOW_LATENCY, url]
+
+
+class DvrUnreachable(Exception):
+    """The DVR didn't answer at all (as opposed to rejecting the login)."""
 
 
 def check_login(args, password, ch):
@@ -143,13 +151,13 @@ def check_login(args, password, ch):
             if attempt == 1:
                 print("The DVR is slow to answer, trying once more...")
                 continue
-            sys.exit(f"The DVR at {host}:{port} didn't answer within 15 seconds (twice).\n"
-                     "It may be busy (too many viewers or streams at once) or restarting. Close other\n"
-                     "viewers (SmartPSS, phone app, VLC, other copies of this script), wait a minute and retry.")
+            raise DvrUnreachable(f"The DVR at {host}:{port} didn't answer within 15 seconds (twice). "
+                                 "It may be busy (too many viewers or streams at once) or restarting. Close other "
+                                 "viewers (vendor apps, VLC, other copies of this), wait a minute and retry.")
         except OSError as e:
-            hint = ("\nIf you ran this inside the Claude app's terminal, use the Mac's Terminal app instead."
+            hint = (" On macOS, check System Settings > Privacy & Security > Local Network for the app running this."
                     if "route" in str(e).lower() else "")
-            sys.exit(f"Can't reach the DVR at {host}:{port}: {e}{hint}")
+            raise DvrUnreachable(f"Can't reach the DVR at {host}:{port}: {e}.{hint}")
     status = reply.split("\r\n", 1)[0].split(" ")
     code = status[1] if len(status) > 1 else ""
     if code == "200":
@@ -208,6 +216,10 @@ def stop(procs):
 IDLE_STOP = 30      # seconds after the last viewer leaves before a camera stream is closed
 WEB_FPS = 15        # most frames per second sent to each browser
 KEY_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer_web_key")
+ADMIN_KEY_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer_admin_key")
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer.json")  # settings made on the setup page
+BRAND_LABELS = [("dahua", "Dahua (Amcrest, Lorex, CP Plus, ...)"), ("hikvision", "Hikvision (HiLook, Annke, ...)"),
+                ("xmeye", "XMEye / NetSurveillance"), ("custom", "Other: enter the RTSP address")]
 
 
 class JpegSource:
@@ -276,29 +288,90 @@ class JpegSource:
 
     def close(self):
         self.stopping.set()  # so a camera about to reconnect doesn't start again during shutdown
+        with self.cond:
+            self.cond.notify_all()  # wake viewers so their streams end
         if self.proc:
             stop([self.proc])
 
 
-def load_web_key(args):
-    if args.web_key:
-        return args.web_key
+def write_private(path, text):
+    """Write a file only this user can read (keys, saved settings)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
     try:
-        with open(KEY_FILE) as f:
+        os.chmod(path, 0o600)  # in case the file already existed with looser permissions
+    except OSError:
+        pass
+
+
+def load_or_create_key(path, given=None):
+    """Returns (key, saved): a key given on the command line, else the saved one, else a new saved one."""
+    if given:
+        return given, False
+    try:
+        with open(path) as f:
             key = f.read().strip()
         if key:
-            return key
+            return key, True
     except OSError:
         pass
     import secrets as pysecrets
     key = pysecrets.token_urlsafe(9)
     try:
-        fd = os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(key)
+        write_private(path, key)
+        return key, True
     except OSError:
-        pass  # still works, the key just changes next time
-    return key
+        return key, False  # still works, the key just changes next time
+
+
+def parse_channels(text):
+    """'1-4', '1 2 4' or '1,2,4' -> [1, 2, 4]."""
+    chans = []
+    for part in text.replace(",", " ").split():
+        lo, sep, hi = part.partition("-")
+        if not lo.isdigit() or (sep and not hi.isdigit()):
+            raise ValueError(f"'{part}' isn't a channel number or range like 1-8")
+        for ch in range(int(lo), int(hi if sep else lo) + 1):
+            if not 1 <= ch <= 64:
+                raise ValueError("Channel numbers go from 1 to 64")
+            if ch not in chans:
+                chans.append(ch)
+    if not chans:
+        raise ValueError("Enter at least one camera channel, e.g. 1-4")
+    if len(chans) > 32:
+        raise ValueError("At most 32 cameras at once")
+    return chans
+
+
+def make_settings(ip, brand, port, user, channels, url_template=None, main=False):
+    """The DVR settings the viewer runs with (same attribute names as the command-line options)."""
+    return SimpleNamespace(ip=ip, brand=brand, port=port, user=user, channels=channels, main=main, test=False,
+                           url_template=url_template if brand == "custom" else BRANDS[brand])
+
+
+def load_settings():
+    try:
+        with open(CONFIG_FILE) as f:
+            d = json.load(f)
+        brand = d.get("brand", "dahua")
+        if brand not in BRANDS and brand != "custom":
+            return None, ""
+        cfg = make_settings(d["ip"], brand, int(d.get("port", 554)), d["user"], [int(c) for c in d["channels"]],
+                            d.get("url_template"), bool(d.get("main")))
+        return cfg, d.get("password") or ""
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, ""
+
+
+def save_settings(cfg, password, remember):
+    d = {"ip": cfg.ip, "brand": cfg.brand, "port": cfg.port, "user": cfg.user, "channels": cfg.channels,
+         "main": cfg.main}
+    if cfg.brand == "custom":
+        d["url_template"] = cfg.url_template
+    if remember:
+        d["password"] = password
+    write_private(CONFIG_FILE, json.dumps(d, indent=2))
 
 
 def lan_ip(towards):
@@ -318,17 +391,25 @@ def can_open_browser():
     return True
 
 
-def run_server(args, password, secrets):
+def run_server(args, cfg, password, draft=None):
+    """Serve the viewer. cfg is None until the DVR is set up (then /setup asks for it).
+    draft: saved settings to pre-fill the setup page with when they couldn't be used as they are."""
     import hmac
-    import json
+    import html
+    import secrets as pysecrets
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import parse_qs
 
-    key = load_web_key(args)
+    view_key, view_key_saved = load_or_create_key(KEY_FILE, args.web_key)
+    admin_key, _ = load_or_create_key(ADMIN_KEY_FILE)
+    form_token = pysecrets.token_urlsafe(16)  # proves a settings change came from our own setup page
+    lock = threading.Lock()
+    state = {"cfg": None, "password": "", "sources": {}, "draft": draft}
+    links = {}
 
-    def make_cmd_for(ch, quality):
+    def make_cmd_for(cfg, password, ch, quality):
         def make_cmd():
-            *opts, src = source(args, password, ch, 0 if quality == "main" else default_sub())
+            *opts, src = source(cfg, password, ch, 0 if quality == "main" else default_sub())
             vf = "scale='min(1280,iw)':-2," if quality == "main" else ""
             return ["ffmpeg", "-hide_banner", "-loglevel", "error", *opts, "-i", src, "-an",
                     # old DVRs send frames with repeated timestamps, so renumber them in milliseconds
@@ -337,11 +418,22 @@ def run_server(args, password, secrets):
                     "-c:v", "mjpeg", "-q:v", "6", "-f", "mjpeg", "-"]
         return make_cmd
 
-    sources = {(ch, q): JpegSource(ch, q, make_cmd_for(ch, q), secrets)
-               for ch in args.channels for q in ("sub", "main")}
-    page = WEB_PAGE.replace("__CONFIG__", json.dumps({
-        "channels": args.channels, "title": f"DVR {'test video' if args.test else args.ip}",
-        "allMain": args.main, "layout": args.layout}))
+    def apply(cfg, password):
+        secrets_ = [quote(password, safe=""), password]
+        new = {} if cfg is None else {
+            (ch, q): JpegSource(ch, q, make_cmd_for(cfg, password, ch, q), secrets_)
+            for ch in cfg.channels for q in ("sub", "main")}
+        with lock:
+            old = state["sources"]
+            state.update(cfg=cfg, password=password, sources=new)
+        # closing waits for each ffmpeg to finish, so don't hold up the request doing it
+        threading.Thread(target=lambda: [s.close() for s in old.values()], daemon=True).start()
+
+    apply(cfg, password)
+
+    def snapshot():
+        with lock:
+            return state["cfg"], state["sources"]
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -349,56 +441,180 @@ def run_server(args, password, secrets):
         def log_message(self, *a):
             pass
 
-        def authorized(self, query):
-            given = query.get("key", [""])[0]
+        def cookie(self, name):
             for part in self.headers.get("Cookie", "").split(";"):
-                name, _, value = part.strip().partition("=")
-                if name == "dvrkey":
-                    given = given or value
-            return hmac.compare_digest(given.encode(), key.encode())
+                k, _, v = part.strip().partition("=")
+                if k == name:
+                    return v
+            return ""
 
-        def send_plain(self, code, text, extra=()):
-            body = text.encode()
+        @staticmethod
+        def matches(given, key):
+            return bool(given) and hmac.compare_digest(given.encode(), key.encode())
+
+        def is_admin(self, query):
+            # the computer running this is trusted; other devices need the admin link
+            local = self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+            return ((local and not args.no_local_admin)
+                    or self.matches(query.get("admin", [""])[0] or self.cookie("dvradmin"), admin_key))
+
+        def can_view(self, query):
+            return self.is_admin(query) or self.matches(query.get("key", [""])[0] or self.cookie("dvrkey"), view_key)
+
+        def send(self, code, body, ctype="text/html; charset=utf-8", extra=()):
+            body = body.encode() if isinstance(body, str) else body
             self.send_response(code)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
             for h in extra:
                 self.send_header(*h)
             self.end_headers()
             self.wfile.write(body)
 
+        def redirect(self, where, cookie=None, code=302):
+            extra = [("Location", where)]
+            if cookie:
+                extra.append(("Set-Cookie", f"{cookie}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict"))
+            self.send(code, "", "text/plain", extra)
+
+        def message_page(self, code, title, text):
+            self.send(code, MESSAGE_PAGE.replace("__TITLE__", html.escape(title)).replace("__TEXT__", html.escape(text)))
+
         def do_GET(self):
             parts = urlsplit(self.path)
             query = parse_qs(parts.query)
-            if not self.authorized(query):
-                return self.send_plain(403, "Access key missing or wrong. Open the full link shown on the computer running dvr-nvr-viewer.")
+            if "admin" in query:
+                if not self.matches(query["admin"][0], admin_key):
+                    return self.message_page(403, "Wrong admin link", "Open the admin link exactly as dvr-nvr-viewer printed it.")
+                # remember it in a cookie and drop it from the address bar
+                return self.redirect("/setup", f"dvradmin={admin_key}")
             if "key" in query:
-                # remember the key in a cookie and drop it from the address bar
-                return self.send_plain(302, "", [("Location", "/"), ("Set-Cookie",
-                                       f"dvrkey={key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict")])
+                if not self.matches(query["key"][0], view_key):
+                    return self.message_page(403, "Wrong link", "Open the link exactly as dvr-nvr-viewer printed it.")
+                return self.redirect("/", f"dvrkey={view_key}")
+            cfg, sources = snapshot()
+            if parts.path == "/setup":
+                if not self.is_admin(query):
+                    return self.message_page(403, "Settings are for the admin",
+                                             "Changing the DVR settings needs the admin link that dvr-nvr-viewer "
+                                             "printed when it started (or use the computer it runs on).")
+                return self.setup_page()
+            if not self.can_view(query):
+                return self.message_page(403, "Access key missing or wrong",
+                                         "Open the full link shown on the computer running dvr-nvr-viewer.")
             if parts.path == "/":
-                body = page.encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                return self.wfile.write(body)
+                if cfg is None:
+                    if self.is_admin(query):
+                        return self.redirect("/setup")
+                    return self.message_page(200, "Not set up yet",
+                                             "This viewer isn't connected to a DVR yet. Someone with the admin link "
+                                             "(or the computer running dvr-nvr-viewer) needs to set it up first.")
+                page = WEB_PAGE.replace("__CONFIG__", json.dumps({
+                    "channels": cfg.channels, "title": "DVR test video" if cfg.test else f"DVR {cfg.ip}",
+                    "allMain": cfg.main, "layout": args.layout, "admin": self.is_admin(query)}))
+                return self.send(200, page)
             bits = parts.path.strip("/").split("/")
             if len(bits) == 3 and bits[0] == "stream" and bits[1].isdigit() and (int(bits[1]), bits[2]) in sources:
                 return self.stream(sources[(int(bits[1]), bits[2])])
-            if len(bits) == 2 and bits[0] == "status":
+            if len(bits) == 2 and bits[0] == "status" and cfg is not None:
                 info = {str(ch): {"ok": any(time.monotonic() - s.last_frame_at < STALE_AFTER
                                             for (c, _), s in sources.items() if c == ch and s.seq),
                                   "auth_failed": any(s.auth_failed for (c, _), s in sources.items() if c == ch)}
-                        for ch in args.channels}
-                body = json.dumps(info).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                return self.wfile.write(body)
-            self.send_plain(404, "Not found")
+                        for ch in cfg.channels}
+                return self.send(200, json.dumps(info), "application/json")
+            self.send(404, "Not found", "text/plain")
+
+        def setup_page(self, values=None, error=""):
+            cfg, _ = snapshot()
+            base = cfg if cfg is not None and not cfg.test else state["draft"]
+            v = {"ip": "", "brand": "dahua", "port": "554", "user": "", "channels": "1-4", "url_template": "",
+                 "main": False, "remember": True}
+            if base is not None:
+                v.update(ip=base.ip, brand=base.brand, port=str(base.port), user=base.user, main=base.main,
+                         channels=" ".join(map(str, base.channels)),
+                         url_template=base.url_template if base.brand == "custom" else "")
+            if values:
+                v.update(values)
+            have_password = cfg is not None and not cfg.test and bool(state["password"])
+            options = "".join(f'<option value="{b}"{" selected" if v["brand"] == b else ""}>{label}</option>'
+                              for b, label in BRAND_LABELS)
+            fill = {
+                "__ERROR__": f'<p class="error">{html.escape(error)}</p>' if error else "",
+                "__TOKEN__": form_token, "__IP__": html.escape(v["ip"]), "__PORT__": html.escape(v["port"]),
+                "__USER__": html.escape(v["user"]), "__CHANNELS__": html.escape(v["channels"]),
+                "__TEMPLATE__": html.escape(v["url_template"]), "__BRANDS__": options,
+                "__PW_HINT__": "leave empty to keep the current one" if have_password else "",
+                "__MAIN__": " checked" if v["main"] else "", "__REMEMBER__": " checked" if v["remember"] else "",
+                "__BACK__": '<a href="/">Back to the cameras</a>' if cfg is not None else "",
+                "__SHARE__": html.escape(links.get("view", "")), "__ADMIN__": html.escape(links.get("admin", "")),
+            }
+            page = SETUP_PAGE
+            for k, val in fill.items():
+                page = page.replace(k, val)
+            self.send(200, page)
+
+        def do_POST(self):
+            if urlsplit(self.path).path != "/setup":
+                return self.send(404, "Not found", "text/plain")
+            if not self.is_admin({}):
+                return self.message_page(403, "Settings are for the admin", "This needs the admin link.")
+            origin = self.headers.get("Origin")
+            if origin and urlsplit(origin).netloc != self.headers.get("Host"):
+                return self.message_page(403, "Blocked", "Settings can only be changed from this viewer's own page.")
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > 20000:
+                return self.message_page(413, "Too much data", "That form was far too big.")
+            form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode(errors="replace")).items()}
+            if not self.matches(form.get("token", ""), form_token):
+                return self.message_page(403, "Blocked", "This form is out of date. Go back, reload the page and try again.")
+            values = {k: form.get(k, "").strip() for k in ("ip", "brand", "port", "user", "channels", "url_template")}
+            values.update(main=form.get("main") == "on", remember=form.get("remember") == "on")
+            password = form.get("password", "")
+            try:
+                new = self.validate(values, password)
+            except ValueError as e:
+                return self.setup_page(values, str(e))
+            if not password:
+                password = state["password"]
+            try:
+                ok = check_login(new, password, new.channels[0])
+            except DvrUnreachable as e:
+                return self.setup_page(values, str(e))
+            if ok is False:
+                return self.setup_page(values, "The DVR rejected this username or password. Nothing else was tried. "
+                                       "If it worked before, the account may be locked after several wrong tries: "
+                                       "wait about 30 minutes (or restart the DVR) before trying again.")
+            try:
+                save_settings(new, password, values["remember"])
+            except OSError as e:
+                print(f"Couldn't save the settings ({e}); they'll only last until this stops.", file=sys.stderr)
+            state["draft"] = None
+            apply(new, password)
+            print(f"Settings changed: cameras {' '.join(map(str, new.channels))} from {new.ip}")
+            self.redirect("/", code=303)
+
+        def validate(self, v, password):
+            if not v["ip"] or len(v["ip"]) > 253 or not all(c.isalnum() or c in ".-:[]" for c in v["ip"]):
+                raise ValueError("Enter the DVR's address, like 192.168.1.64")
+            if v["brand"] not in BRANDS and v["brand"] != "custom":
+                raise ValueError("Pick the DVR brand")
+            if v["brand"] == "custom" and not (v["url_template"].startswith("rtsp://") and "{channel}" in v["url_template"]):
+                raise ValueError("A custom address must start with rtsp:// and contain {channel}")
+            if not v["port"].isdigit() or not 1 <= int(v["port"]) <= 65535:
+                raise ValueError("The RTSP port is a number, usually 554")
+            if not v["user"] or len(v["user"]) > 64:
+                raise ValueError("Enter the DVR username")
+            new = make_settings(v["ip"], v["brand"], int(v["port"]), v["user"], parse_channels(v["channels"]),
+                                v["url_template"], v["main"])
+            if not password:
+                cfg, _ = snapshot()
+                same_dvr = (cfg is not None and not cfg.test and state["password"] and cfg.ip == new.ip
+                            and cfg.port == new.port and cfg.user == new.user and cfg.url_template == new.url_template)
+                if not same_dvr:
+                    # never send a kept password to a different address or account
+                    raise ValueError("Enter the password (the saved one is only reused for the same DVR and user)")
+            return new
 
         def stream(self, src):
             self.send_response(200)
@@ -410,9 +626,10 @@ def run_server(args, password, secrets):
             src.acquire()
             seen, last_sent = 0, 0.0
             try:
-                while not src.auth_failed:
+                while not src.auth_failed and not src.stopping.is_set():
                     with src.cond:
-                        src.cond.wait_for(lambda: src.seq != seen or src.auth_failed, timeout=10)
+                        src.cond.wait_for(lambda: src.seq != seen or src.auth_failed or src.stopping.is_set(),
+                                          timeout=10)
                         jpeg, seq = src.jpeg, src.seq
                     if seq == seen or jpeg is None:
                         continue
@@ -449,28 +666,127 @@ def run_server(args, password, secrets):
             return
         default_handle_error(request, client_address)
     server.handle_error = handle_error
+
     shared = args.bind in ("0.0.0.0", "")
-    host = lan_ip(args.ip if not args.test else "8.8.8.8") if shared else args.bind
-    local_url = f"http://{'127.0.0.1' if shared else host}:{args.web_port}/?key={key}"
+    host = lan_ip(cfg.ip if cfg is not None and not cfg.test else "8.8.8.8") if shared else args.bind
+    links["view"] = f"http://{host}:{args.web_port}/?key={view_key}"
+    links["admin"] = f"http://{host}:{args.web_port}/?admin={admin_key}"
+    local = f"http://{'127.0.0.1' if shared else host}:{args.web_port}"
+    print(f"\nRunning. To watch on any phone, tablet or computer on this network, open:\n\n"
+          f"    {links['view']}\n\n"
+          f"To change the DVR settings from another device, use the admin link (keep it to yourself):\n\n"
+          f"    {links['admin']}\n")
+    if view_key_saved:
+        print(f"Keys are saved in {os.path.dirname(KEY_FILE) or '.'} so these links keep working "
+              f"(delete {os.path.basename(KEY_FILE)} or {os.path.basename(ADMIN_KEY_FILE)} for new ones).")
     if shared:
-        print(f"\nRunning. On any phone, tablet or computer on this network, open:\n\n"
-              f"    http://{host}:{args.web_port}/?key={key}\n")
-        if not args.web_key:  # a key given with --web-key / DVR_WEB_KEY isn't stored anywhere
-            print(f"The key is saved in {KEY_FILE} so this link keeps working (delete that file for a new key).")
         print("Only use this on your home network: don't port-forward it to the internet.")
-    else:
-        print(f"\nRunning. Open: {local_url}")
     print("Keep this running while people are watching; Ctrl+C stops it.")
     if not args.no_browser and can_open_browser():
-        webbrowser.open(local_url)
+        if args.no_local_admin:
+            webbrowser.open(links["admin"] if cfg is None else f"{local}/?key={view_key}")
+        else:
+            webbrowser.open(f"{local}/setup" if cfg is None else f"{local}/?key={view_key}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
-        for s in sources.values():
+        for s in state["sources"].values():
             s.close()
+
+
+PAGE_STYLE = r"""
+  :root { --bg: #0b0d10; --panel: #15181d; --field: #0f1216; --line: #333a43; --text: #e8eaed;
+    --muted: #9aa0a6; --accent: #4f8cff; --error: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 16px; }
+  a { color: var(--accent); }
+  form { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  label { display: block; font-weight: 600; margin: 14px 0 4px; }
+  label:first-child { margin-top: 0; }
+  .hint { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+  input[type=text], input[type=password], select { width: 100%; padding: 10px 12px; font: inherit;
+    color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 6px; }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; margin-top: 12px; }
+  .check input { margin-top: 4px; }
+  .row { display: grid; grid-template-columns: 1fr 110px; gap: 12px; }
+  button { margin-top: 18px; width: 100%; padding: 12px; font: inherit; font-weight: 600; color: #fff;
+    background: var(--accent); border: 0; border-radius: 6px; cursor: pointer; }
+  button[disabled] { opacity: .6; cursor: wait; }
+  .error { color: var(--error); background: rgba(255,107,107,.1); border: 1px solid rgba(255,107,107,.4);
+    border-radius: 6px; padding: 10px 12px; }
+  .links { margin-top: 22px; font-size: 13px; color: var(--muted); word-break: break-all; }
+  .links code { color: var(--text); }
+  .hidden { display: none; }
+"""
+
+MESSAGE_PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title><style>""" + PAGE_STYLE + r"""</style></head>
+<body><main><h1>__TITLE__</h1><p>__TEXT__</p></main></body></html>
+"""
+
+SETUP_PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DVR settings</title><style>""" + PAGE_STYLE + r"""</style></head>
+<body><main>
+<h1>Connect to your DVR / NVR</h1>
+<p>Enter the details you'd use in the DVR's own app. The login is checked once; if the DVR rejects it,
+nothing is retried, so the account can't get locked. __BACK__</p>
+__ERROR__
+<form method="post" action="/setup" id="f">
+  <input type="hidden" name="token" value="__TOKEN__">
+  <div class="row">
+    <div><label for="ip">Address <span class="hint">IP or name, e.g. 192.168.1.64</span></label>
+      <input type="text" id="ip" name="ip" value="__IP__" required autocomplete="off" inputmode="url"></div>
+    <div><label for="port">RTSP port <span class="hint">usually 554</span></label>
+      <input type="text" id="port" name="port" value="__PORT__" inputmode="numeric"></div>
+  </div>
+  <label for="brand">Brand</label>
+  <select id="brand" name="brand">__BRANDS__</select>
+  <div id="tpl" class="hidden">
+    <label for="url_template">RTSP address <span class="hint">placeholders: {user} {password} {ip} {port}
+      {channel}, and {sub} (0 = full quality, 1 = lighter) or {stream} (1 = full, 2 = lighter)</span></label>
+    <input type="text" id="url_template" name="url_template" value="__TEMPLATE__" autocomplete="off"
+      placeholder="rtsp://{user}:{password}@{ip}:{port}/ch{channel}/{stream}">
+  </div>
+  <label for="user">Username</label>
+  <input type="text" id="user" name="user" value="__USER__" required autocomplete="username">
+  <label for="password">Password <span class="hint">__PW_HINT__</span></label>
+  <input type="password" id="password" name="password" autocomplete="current-password">
+  <label for="channels">Cameras <span class="hint">channel numbers, e.g. 1-8 or 1 2 4 5 6</span></label>
+  <input type="text" id="channels" name="channels" value="__CHANNELS__" required>
+  <label class="check"><input type="checkbox" name="main"__MAIN__>
+    <span>Full quality for every camera <span class="hint">Uses much more network and CPU. Otherwise only
+    enlarged cameras are full quality.</span></span></label>
+  <label class="check"><input type="checkbox" name="remember"__REMEMBER__>
+    <span>Remember the password on this computer <span class="hint">So it reconnects after a restart.
+    Stored in a file only your user account can read.</span></span></label>
+  <button type="submit" id="go">Save and connect</button>
+</form>
+<div class="links">
+  Watch link for other devices: <code>__SHARE__</code><br>
+  Admin link (to change these settings from another device; keep it private): <code>__ADMIN__</code>
+</div>
+<script>
+const brand = document.getElementById("brand"), tpl = document.getElementById("tpl");
+function showTemplate() { tpl.classList.toggle("hidden", brand.value !== "custom"); }
+brand.addEventListener("change", showTemplate); showTemplate();
+document.getElementById("f").addEventListener("submit", () => {
+  const b = document.getElementById("go"); b.disabled = true; b.textContent = "Checking the login…";
+});
+</script>
+</main></body></html>
+"""
 
 
 WEB_PAGE = r"""<!doctype html>
@@ -515,7 +831,8 @@ WEB_PAGE = r"""<!doctype html>
   <h1 id="title">DVR</h1>
   <div class="btns" id="layouts"></div>
   <div class="btns"><button id="prev" title="Previous">◀</button><button id="next" title="Next">▶</button>
-  <button id="fs" title="Fullscreen">⛶</button></div>
+  <button id="fs" title="Fullscreen">⛶</button>
+  <button id="settings" class="hidden" title="DVR settings" onclick="location.href='/setup'">⚙</button></div>
 </header>
 <main id="wall"></main>
 <footer>Tap a camera to make it big · double-tap for just that camera · ◀ ▶ for pages or cameras</footer>
@@ -523,6 +840,7 @@ WEB_PAGE = r"""<!doctype html>
 const CFG = __CONFIG__;
 const chans = CFG.channels, n = chans.length;
 document.getElementById("title").textContent = CFG.title;
+if (CFG.admin) document.getElementById("settings").classList.remove("hidden");
 document.title = CFG.title;
 
 const wall = document.getElementById("wall");
@@ -685,12 +1003,24 @@ def main():
         sys.exit("ffmpeg not found. Install it (macOS: brew install ffmpeg, Windows: winget install Gyan.FFmpeg,\n"
                  "Linux: sudo apt install ffmpeg) and try again.")
 
-    password = ""
-    if not args.test:
-        while not args.user:
-            args.user = input("DVR username: ").strip()
-        password = os.environ.get("DVR_PASS") or getpass.getpass(f"DVR password for {args.user}: ")
-        ok = check_login(args, password, args.channels[0])
+    cfg, password, draft = None, "", None
+    if args.test:
+        cfg = SimpleNamespace(test=True, ip=None, brand="test", port=args.port, user="", channels=args.channels,
+                              url_template=args.url_template, main=args.main)
+    elif args.ip:
+        # set up on the command line
+        cfg = SimpleNamespace(test=False, ip=args.ip, brand=args.brand if not args.url_template else "custom",
+                              port=args.port, user=args.user, channels=args.channels,
+                              url_template=args.url_template, main=args.main)
+        if args.url_template == BRANDS[args.brand]:
+            cfg.brand = args.brand
+        while not cfg.user:
+            cfg.user = input("DVR username: ").strip()
+        password = os.environ.get("DVR_PASS") or getpass.getpass(f"DVR password for {cfg.user}: ")
+        try:
+            ok = check_login(cfg, password, cfg.channels[0])
+        except DvrUnreachable as e:
+            sys.exit(str(e))
         if ok is False:
             print("The DVR rejected this username/password. Nothing else was tried.\n"
                   "If it worked before, the account is probably locked after several wrong tries:\n"
@@ -699,10 +1029,31 @@ def main():
             sys.exit(EXIT_LOGIN_REJECTED)
         if ok:
             print("Login OK.")
-    secrets = [quote(password, safe=""), password]
-    src = "test video" if args.test else args.ip
-    print(f"Cameras {' '.join(map(str, args.channels))} from {src}")
-    run_server(args, password, secrets)
+    else:
+        # set up in the browser, or use what was set up there last time
+        saved, saved_password = load_settings()
+        if saved is None:
+            print("No DVR set up yet: the setup page will ask for its address, username and password.")
+        elif not saved_password:
+            draft = saved
+            print(f"The password for {saved.ip} wasn't remembered: enter it on the setup page.")
+        else:
+            try:
+                ok = check_login(saved, saved_password, saved.channels[0])
+            except DvrUnreachable as e:
+                ok = None  # start anyway; the cameras reconnect once the DVR is back
+                print(f"Warning: {e}", file=sys.stderr)
+            if ok is False:
+                draft = saved
+                print(f"The DVR at {saved.ip} rejected the saved password (nothing else was tried). "
+                      "Enter the right one on the setup page.", file=sys.stderr)
+            else:
+                cfg, password = saved, saved_password
+                print(f"Using the saved settings for {saved.ip}.")
+
+    if cfg is not None:
+        print(f"Cameras {' '.join(map(str, cfg.channels))} from {'test video' if cfg.test else cfg.ip}")
+    run_server(args, cfg, password, draft)
     return 0
 
 
