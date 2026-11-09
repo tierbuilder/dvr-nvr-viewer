@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dvr-nvr-viewer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Watch all your DVR/NVR/IP cameras at once, in a desktop window or a web page. No browser plugins."
 readme = "README.md"
 license = { file = "LICENSE" }

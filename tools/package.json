@@ -1,0 +1,9 @@
+{
+  "name": "dvr-nvr-viewer-tools",
+  "private": true,
+  "type": "module",
+  "description": "Builds browser-app/ into a signed web bundle (.swbn) that Chrome installs as an app.",
+  "scripts": { "build-app": "node build-app.mjs" },
+  "engines": { "node": ">=22.13" },
+  "devDependencies": { "wbn": "0.0.10", "wbn-sign": "0.3.3" }
+}

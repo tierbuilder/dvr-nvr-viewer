@@ -1,0 +1,13 @@
+{
+  "name": "dvr-viewer-website",
+  "private": true,
+  "type": "module",
+  "description": "The DVR Viewer download website, served by a Cloudflare Worker.",
+  "scripts": {
+    "build": "python3 build.py",
+    "dev": "wrangler dev",
+    "deploy": "python3 build.py && wrangler deploy"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": { "wrangler": "^4.45.0" }
+}

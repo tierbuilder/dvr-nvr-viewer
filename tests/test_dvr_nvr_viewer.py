@@ -3,9 +3,11 @@
 The end-to-end tests use --test (fake video), so they need ffmpeg but no real DVR.
 """
 import base64
+import hashlib
 import http.cookiejar
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -142,16 +144,27 @@ class Helpers(unittest.TestCase):
 
 
 class FakeDvr:
-    """A tiny RTSP server that answers one login check."""
+    """A tiny RTSP server that answers login checks (Basic, or Digest only like many newer DVRs)."""
 
     def __init__(self, good_user, good_pass, digest_only=False):
+        self.user, self.password = good_user, good_pass
         self.good = "Basic " + base64.b64encode(f"{good_user}:{good_pass}".encode()).decode()
         self.digest_only = digest_only
+        self.logins = 0  # requests that carried a login (the DVR counts the failed ones)
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(5)
         self.port = self.sock.getsockname()[1]
         threading.Thread(target=self._serve, daemon=True).start()
+
+    def _digest_ok(self, req):
+        m = re.search(r"Authorization: Digest (.*)", req)
+        if not m:
+            return False
+        f = dict(re.findall(r'(\w+)="?([^",]*)"?', m.group(1)))
+        md5 = lambda t: hashlib.md5(t.encode()).hexdigest()  # noqa: E731
+        want = md5(f"{md5(f'{self.user}:x:{self.password}')}:n:{md5('DESCRIBE:' + f['uri'])}")
+        return f.get("username") == self.user and f.get("response") == want
 
     def _serve(self):
         while True:
@@ -161,10 +174,13 @@ class FakeDvr:
                 return
             with conn:
                 req = conn.recv(4096).decode()
-                if self.digest_only:
-                    reply = 'RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\nWWW-Authenticate: Digest realm="x", nonce="n"\r\n\r\n'
-                elif self.good in req:
+                self.logins += "Authorization:" in req
+                ok = self._digest_ok(req) if self.digest_only else self.good in req
+                if ok:
                     reply = "RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n"
+                elif self.digest_only:  # offers both, but only takes Digest
+                    reply = ('RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\nWWW-Authenticate: Digest realm="x", nonce="n"\r\n'
+                             'WWW-Authenticate: Basic realm="x"\r\n\r\n')
                 else:
                     reply = 'RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\nWWW-Authenticate: Basic realm="x"\r\n\r\n'
                 conn.sendall(reply.encode())
@@ -184,10 +200,18 @@ class LoginCheck(unittest.TestCase):
         self.assertIs(self.check(dvr, "good"), True)
         self.assertIs(self.check(dvr, "bad"), False)
 
-    def test_digest_only_dvr_is_unknown_not_rejected(self):
+    def test_digest_login(self):
+        # offers Basic too but only takes Digest: Basic must not be mistaken for a wrong password
         dvr = FakeDvr("admin", "good", digest_only=True)
         self.addCleanup(dvr.close)
-        self.assertIsNone(self.check(dvr, "good"))
+        self.assertIs(self.check(dvr, "good"), True)
+        self.assertIs(self.check(dvr, "bad"), False)
+
+    def test_only_one_login_try(self):
+        dvr = FakeDvr("admin", "good", digest_only=True)
+        self.addCleanup(dvr.close)
+        self.check(dvr, "bad")
+        self.assertEqual(dvr.logins, 1)
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
@@ -404,6 +428,125 @@ class Installer(unittest.TestCase):
             ''', pw)
             self.assertEqual(out, pw)
         self.assertFalse(os.path.exists("/tmp/should-not-exist"))
+
+
+@unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
+class StopAndRestart(unittest.TestCase):
+    """The double-click download has no terminal: it's stopped from the page, and a second launch reuses the first."""
+
+    def test_second_launch_and_stop_button(self):
+        home = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, home, True)
+        env = dict(os.environ, HOME=home, USERPROFILE=home)
+        proc, log, base = start_app("--test", "1", env=env)
+        self.addCleanup(stop_app, proc, log)
+        port = int(base.rsplit(":", 1)[1])
+        self.assertTrue(app.already_running(port))
+        again = subprocess.run([sys.executable, SCRIPT, "--test", "1", "--no-browser", "--bind", "127.0.0.1",
+                                "--web-port", str(port)], capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("already running", again.stdout)
+        quit_url = base + "/quit"
+        with self.assertRaises(urllib.error.HTTPError) as no_token:
+            urllib.request.urlopen(urllib.request.Request(quit_url, data=b"token=wrong"), timeout=10)
+        self.assertEqual(no_token.exception.code, 403)
+        self.assertIsNone(proc.poll())
+        token = re.search(r'name="token" value="([^"]+)"',
+                          urllib.request.urlopen(base + "/setup", timeout=10).read().decode()).group(1)
+        urllib.request.urlopen(urllib.request.Request(quit_url, data=f"token={token}".encode()), timeout=10).read()
+        self.assertEqual(proc.wait(30), 0)
+        self.assertFalse(app.already_running(port))
+
+
+class Website(unittest.TestCase):
+    """The download site in website/ must match the app and the release files."""
+    SITE = os.path.join(os.path.dirname(__file__), "..", "website")
+
+    def read(self, *parts):
+        with open(os.path.join(self.SITE, *parts), encoding="utf-8") as f:
+            return f.read()
+
+    def test_generated_pages_are_up_to_date(self):
+        sys.path.insert(0, self.SITE)
+        import build
+        for path, text in build.outputs().items():
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), text, f"{path} is out of date: run python3 website/build.py")
+
+    def test_every_brand_is_on_the_brands_page(self):
+        page = self.read("public", "brands", "index.html")
+        for key, label, *_ in app.BRAND_LIST:
+            self.assertIn(f'id="{key}"', page)
+
+    def test_download_links_match_the_release_files(self):
+        worker = self.read("src", "worker.js")
+        files = set(re.findall(r'"(dvr-nvr-viewer-[\w.-]+)"', worker))
+        self.assertEqual(files, {"dvr-nvr-viewer-windows-x64.exe", "dvr-nvr-viewer-macos-arm64.zip",
+                                 "dvr-nvr-viewer-macos-x64.zip", "dvr-nvr-viewer-linux-x64",
+                                 "dvr-nvr-viewer-linux-arm64"})
+        platforms = set(re.findall(r'^  "?([a-z-]+)"?: "dvr-nvr-viewer', worker, re.M))
+        page = self.read("public", "index.html")
+        self.assertEqual(set(re.findall(r'href="/download/([a-z-]+)"', page)), platforms)
+
+    def test_pages_have_seo_basics(self):
+        for parts in (("index.html",), ("guide", "index.html"), ("brands", "index.html")):
+            page = self.read("public", *parts)
+            title = re.search(r"<title>(.*?)</title>", page).group(1)
+            desc = re.search(r'name="description" content="(.*?)"', page).group(1)
+            self.assertLessEqual(len(title), 65, parts)
+            self.assertLessEqual(len(desc), 160, parts)
+            self.assertEqual(page.count("<h1"), 1, parts)
+            self.assertIn('rel="canonical" href="__ORIGIN__/', page)
+            for block in re.findall(r'<script type="application/ld\+json">(.*?)</script>', page, re.S):
+                json.loads(block)
+
+    def test_robots_lets_ai_crawlers_in(self):
+        robots = self.read("public", "robots.txt")
+        for bot in ("GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended"):
+            self.assertRegex(robots, rf"User-agent: {bot}\nAllow: /")
+        self.assertNotIn("Disallow", robots)
+
+
+class BrowserApp(unittest.TestCase):
+    """The installable browser app (browser-app/) that reads RTSP itself."""
+    APP = os.path.join(os.path.dirname(__file__), "..", "browser-app")
+
+    def test_brand_list_matches_the_python_app(self):
+        src = open(os.path.join(self.APP, "app.js"), encoding="utf-8").read()
+        block = re.search(r"export const BRAND_LIST = (\[.*?\n\]);", src, re.S).group(1)
+        brands = json.loads(re.sub(r",(\s*[\]}])", r"\1", block))
+        self.assertEqual([tuple(b) for b in brands], [tuple(b) for b in app.BRAND_LIST])
+
+    def test_manifest_allows_direct_sockets(self):
+        with open(os.path.join(self.APP, ".well-known", "manifest.webmanifest"), encoding="utf-8") as f:
+            m = json.load(f)
+        self.assertRegex(m["version"], r"^(\d+\.?)*\d$")
+        for key in ("direct-sockets", "direct-sockets-private", "cross-origin-isolated"):
+            self.assertEqual(m["permissions_policy"][key], ["self"])
+
+    def test_no_inline_scripts_or_innerhtml(self):
+        # installed apps refuse inline scripts and innerHTML (Trusted Types), so the page would break
+        html = open(os.path.join(self.APP, "index.html"), encoding="utf-8").read()
+        self.assertNotRegex(html, r"<script(?![^>]*\bsrc=)")
+        self.assertNotRegex(html, r"\son[a-z]+=")
+        for name in os.listdir(self.APP):
+            if name.endswith(".js"):
+                code = open(os.path.join(self.APP, name), encoding="utf-8").read()
+                self.assertNotIn("innerHTML", code, name)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
+    def test_fake_dvr_streams_with_digest_login(self):
+        sys.path.insert(0, os.path.dirname(__file__))
+        import browser_harness
+        port = browser_harness.run_fake_dvr("127.0.0.1", 0, lambda m: None)
+        url = f"rtsp://admin:demo123@127.0.0.1:{port}/cam/realmonitor?channel=1&subtype=1"
+        r = subprocess.run(["ffmpeg", "-hide_banner", "-rtsp_transport", "tcp", "-timeout", "10000000", "-i", url,
+                            "-frames:v", "10", "-f", "null", "-"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        bad = url.replace("demo123", "nope")
+        r = subprocess.run(["ffmpeg", "-hide_banner", "-rtsp_transport", "tcp", "-i", bad, "-frames:v", "1", "-f", "null", "-"],
+                           capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(r.returncode, 0)
 
 
 if __name__ == "__main__":

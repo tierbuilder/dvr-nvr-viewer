@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to view DVR cameras in a browser (step by step)</title>
+<meta name="description" content="Download DVR Viewer, open it, enter your DVR's IP and password, and watch every camera in any browser or phone. With fixes for common problems.">
+<link rel="canonical" href="__ORIGIN__/guide/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="DVR Viewer">
+<meta property="og:title" content="How to watch your DVR cameras in any browser (free)">
+<meta property="og:description" content="Download, double-click, enter the DVR's IP and password. A step-by-step guide with fixes for common problems.">
+<meta property="og:url" content="__ORIGIN__/guide/">
+<meta property="og:image" content="__ORIGIN__/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "HowTo",
+      "name": "How to watch all your DVR or NVR cameras in a web browser",
+      "description": "Use the free DVR Viewer app to show every camera of a DVR, NVR or IP camera in any browser, without plugins.",
+      "totalTime": "PT5M",
+      "estimatedCost": { "@type": "MonetaryAmount", "currency": "USD", "value": "0" },
+      "tool": [{ "@type": "HowToTool", "name": "A computer on the same network as the DVR" }],
+      "step": [
+        { "@type": "HowToStep", "position": 1, "name": "Download DVR Viewer", "url": "__ORIGIN__/guide/#download", "text": "Download the free file for Windows, macOS, Linux or Raspberry Pi." },
+        { "@type": "HowToStep", "position": 2, "name": "Open it the first time", "url": "__ORIGIN__/guide/#first-run", "text": "Double-click it. On Windows click More info, then Run anyway. On a Mac open System Settings > Privacy & Security and click Open Anyway." },
+        { "@type": "HowToStep", "position": 3, "name": "Pick the brand", "url": "__ORIGIN__/guide/#setup", "text": "Choose your DVR's brand on the setup page that opens in your browser." },
+        { "@type": "HowToStep", "position": 4, "name": "Enter the IP address", "url": "__ORIGIN__/guide/#setup", "text": "Type the DVR's IP address from its Network menu or your router. Keep the RTSP port that's filled in (usually 554)." },
+        { "@type": "HowToStep", "position": 5, "name": "Log in", "url": "__ORIGIN__/guide/#setup", "text": "Enter the same username and password as the DVR's own app." },
+        { "@type": "HowToStep", "position": 6, "name": "Choose cameras", "url": "__ORIGIN__/guide/#setup", "text": "List the camera numbers, for example 1-8, and click Save and connect." },
+        { "@type": "HowToStep", "position": 7, "name": "Watch on phones", "url": "__ORIGIN__/guide/#phones", "text": "Open the watch link shown on the setup page on any phone or tablet on the same Wi-Fi." }
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "DVR Viewer", "item": "__ORIGIN__/" },
+        { "@type": "ListItem", "position": 2, "name": "Setup guide", "item": "__ORIGIN__/guide/" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="mark" href="/" aria-label="DVR Viewer home"><span class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>DVR Viewer</a>
+    <nav aria-label="Main">
+      <a href="/guide/" aria-current="page" class="opt">Setup guide</a>
+      <a href="/brands/" class="opt">Brands</a>
+      <a href="/#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap prose">
+  <p class="crumbs"><a href="/">DVR Viewer</a> › Setup guide</p>
+  <div class="page-head">
+    <h1>Watch your DVR cameras in a browser, step by step</h1>
+    <p class="lede">About five minutes, no technical knowledge needed. You need a computer on the same network as the DVR,
+      and the username and password you use in the DVR's own app.</p>
+  </div>
+
+  <h2 id="download">1. Download</h2>
+  <p>Get the right file from the <a href="/#download">download section</a>: Windows 10/11, Mac (Apple silicon or Intel),
+    Linux, or Raspberry Pi. It's a single file with everything inside, so there's nothing else to install.</p>
+
+  <h2 id="first-run">2. Open it the first time</h2>
+  <p>Because the app isn't signed with a paid Apple or Microsoft certificate, your computer asks you to confirm once.
+    After that it opens normally.</p>
+  <ul>
+    <li><b>Windows:</b> double-click <code>dvr-nvr-viewer-windows-x64.exe</code>. In <i>"Windows protected your PC"</i>
+      click <b>More info</b>, then <b>Run anyway</b>. If the firewall asks, allow it on <b>private networks</b>, so phones can connect.</li>
+    <li><b>Mac:</b> unzip the download and move <b>DVR Viewer</b> to Applications. Double-click it. When you see
+      <i>"Apple could not verify…"</i>, click <b>Done</b>, open <b>System Settings › Privacy &amp; Security</b>, scroll to
+      <i>"DVR Viewer was blocked"</i> and click <b>Open Anyway</b>. When asked, <b>Allow</b> it to find devices on your local network.</li>
+    <li><b>Linux / Raspberry Pi:</b> make the file executable (right-click › Properties › Permissions, or
+      <code>chmod +x dvr-nvr-viewer-linux-*</code>) and run it.</li>
+  </ul>
+  <p>There's no window: the app runs in the background and opens your browser at the setup page.
+    Double-clicking it again just opens the page again.</p>
+
+  <h2 id="setup">3. Set up your DVR (four short questions)</h2>
+  <ol class="steps">
+    <li><h3>Brand</h3><p>Pick your DVR's brand. Unbranded DVRs often work as <b>Dahua</b> or <b>XMEye</b>.
+      Not listed? Choose <b>Other</b> and type the RTSP address from its manual.</p></li>
+    <li><h3>Address</h3><p>The DVR's IP address, e.g. <code>192.168.1.64</code>. It's in the DVR's menu under
+      <b>Network</b>, or in your router's list of devices. Keep the RTSP port that's filled in.</p></li>
+    <li><h3>Login</h3><p>The same username and password as the DVR's own app. It's checked once and never retried,
+      so the DVR won't lock you out.</p></li>
+    <li><h3>Cameras</h3><p>The camera numbers, like <code>1-8</code> or <code>1 2 4 5 6</code>. Click
+      <b>Save and connect</b> and the cameras appear.</p></li>
+  </ol>
+
+  <h2 id="watching">4. Watching</h2>
+  <ul>
+    <li>Switch layouts at the top: <b>grid</b>, <b>2×2</b>, <b>3×3</b>, <b>1+5</b>, <b>1+7</b> and <b>1</b> (single camera).</li>
+    <li>Tap a camera to make it big; double-tap to show only that camera. ◀ ▶ flip pages or cameras.</li>
+    <li>On a keyboard: arrow keys, <b>L</b> for the next layout, <b>1</b>–<b>9</b> for a camera, <b>Esc</b> to go back.</li>
+    <li>Big tiles use the DVR's full-quality stream; small tiles use its lighter stream, which keeps old DVRs fast.</li>
+  </ul>
+
+  <h2 id="phones">5. Watch on phones and tablets</h2>
+  <p>On the setup page, open <b>Watch on phones, tablets and other computers</b> and copy the watch link. Open it on any
+    device on the same Wi-Fi: it remembers the link, so next time just open the bookmark. Keep the <b>admin link</b>
+    to yourself; it lets someone change the DVR settings.</p>
+
+  <h2 id="stop">6. Stopping it</h2>
+  <p>Click the ⚙ button above the cameras, then <b>Stop DVR Viewer</b> at the bottom of the setup page. That closes every
+    camera stream on the DVR.</p>
+
+  <h2 id="always-on">Always on: Raspberry Pi or an old PC</h2>
+  <p>To watch from phones without keeping your main computer on, run DVR Viewer on a Raspberry Pi 4/5 (2 GB or more) or any
+    old PC. The <a href="https://github.com/tierbuilder/dvr-nvr-viewer#run-it-all-the-time-raspberry-pi-or-an-old-pc">README</a>
+    has a one-line installer that starts it automatically at boot.</p>
+
+  <h2 id="troubleshooting">Troubleshooting</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>What you see</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td>"Can't reach the DVR"</td><td>Check the IP address, and that this computer is on the same network as the DVR
+        (same router). On a Mac, allow DVR Viewer under System Settings › Privacy &amp; Security › Local Network.</td></tr>
+      <tr><td>"Nothing answers on port …"</td><td>The RTSP port is wrong or RTSP is switched off. Use the port from the
+        DVR's Network › RTSP menu (usually 554) and make sure RTSP is enabled.</td></tr>
+      <tr><td>"The DVR rejected this username or password"</td><td>Check them in the DVR's own app. If they worked before,
+        the DVR may have locked the account after several wrong tries: wait about 30 minutes or restart the DVR.</td></tr>
+      <tr><td>A camera stays on "connecting…"</td><td>That camera number has no camera, or it's offline. Other cameras
+        are unaffected; remove the number on the setup page if it isn't used.</td></tr>
+      <tr><td>Phones can't open the link</td><td>They must be on the same Wi-Fi. On Windows, allow DVR Viewer on private
+        networks in the firewall.</td></tr>
+      <tr><td>Picture stutters</td><td>Turn off "Full quality for every camera", or use a wired network connection for the
+        computer running DVR Viewer.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Still stuck? The app writes a log to <code>.dvr_nvr_viewer.log</code> in your home folder.
+    <a href="https://github.com/tierbuilder/dvr-nvr-viewer/issues">Open an issue</a> and include it (remove your IP if you like).</p>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <span>DVR Viewer is free, open-source software (MIT). Not affiliated with any camera brand.</span>
+    <nav aria-label="Footer">
+      <a href="/">Home</a><a href="/brands/">Brands &amp; RTSP addresses</a>
+      <a href="https://github.com/tierbuilder/dvr-nvr-viewer">Source code</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

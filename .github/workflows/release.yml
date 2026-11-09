@@ -1,0 +1,59 @@
+# Builds the downloads (Python and ffmpeg included) on every platform and attaches them to a
+# GitHub release. Runs when a version tag is pushed (git tag v0.3.0 && git push origin v0.3.0),
+# or by hand from the Actions tab (then the files are only kept as workflow artifacts).
+name: Release downloads
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest      # dvr-nvr-viewer-windows-x64.exe
+          - os: macos-latest        # dvr-nvr-viewer-macos-arm64.zip (Apple silicon)
+          - os: macos-15-intel      # dvr-nvr-viewer-macos-x64.zip (Intel Macs)
+          - os: ubuntu-22.04        # dvr-nvr-viewer-linux-x64 (older glibc, so it runs on more Linux versions)
+          - os: ubuntu-22.04-arm    # dvr-nvr-viewer-linux-arm64 (Raspberry Pi OS 64-bit)
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the packaging tools
+        run: python -m pip install pyinstaller imageio-ffmpeg pillow
+      - name: Build
+        run: python tools/build_exe.py
+      - name: Check the download starts and serves the page
+        shell: bash
+        run: python tools/smoke_test.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: download-${{ matrix.os }}
+          path: dist/release/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloads
+          merge-multiple: true
+      - name: Attach the downloads to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la downloads
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" downloads/* --repo "$GITHUB_REPOSITORY" --clobber

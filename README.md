@@ -12,9 +12,29 @@ Made for older DVRs whose own web page still asks for an NPAPI / ActiveX plugin 
 - **Each camera is independent.** A slow or stuck camera only freezes its own tile; the others keep playing live, and it reconnects on its own.
 - **Kind to old DVRs.** Cameras are streamed only while someone is watching, small tiles use the lighter stream, and a rejected password is never retried (DVRs lock the account after a few wrong tries).
 - **Your DVR password stays on one computer.** Viewers only need a link with an access key.
-- **Tiny.** One Python file, no Python packages to install. Needs only Python 3.8+ and ffmpeg. Runs on macOS, Windows and Linux, including a Raspberry Pi.
+- **Nothing to install.** Download one file for Windows, macOS or Linux (including a Raspberry Pi) and double-click it: Python and ffmpeg are inside. Or run the single Python file yourself.
 
-## Quick start
+## Download (easiest)
+
+Get the file for your computer from the [latest release](https://github.com/tierbuilder/dvr-nvr-viewer/releases/latest):
+
+| Computer | File | How to start it |
+|---|---|---|
+| Windows 10/11 | `dvr-nvr-viewer-windows-x64.exe` | Double-click. |
+| Mac with Apple silicon (M1 and later) | `dvr-nvr-viewer-macos-arm64.zip` | Unzip, move **DVR Viewer** to Applications, double-click. |
+| Mac with Intel | `dvr-nvr-viewer-macos-x64.zip` | Same as above. |
+| Linux PC | `dvr-nvr-viewer-linux-x64` | Make it executable (`chmod +x`) and run it. |
+| Raspberry Pi (64-bit Raspberry Pi OS) | `dvr-nvr-viewer-linux-arm64` | Same as above. |
+
+Your browser opens the setup page: pick the brand, enter the DVR's address, username, password and cameras, and click **Save and connect**. Everything else is done on that page too: the links for other devices are shown there, and **Stop dvr-nvr-viewer** at the bottom shuts it down (on Windows and macOS it runs without a window). Double-clicking it again while it runs just opens the page again.
+
+**The first time only**, your computer warns about an app from an unknown developer, because these downloads aren't signed with a paid Apple or Microsoft certificate:
+- **Windows:** in "Windows protected your PC", click **More info**, then **Run anyway**. Allow it on **private networks** if the firewall asks, so phones can connect.
+- **macOS:** double-click it once (it gets blocked), then open **System Settings > Privacy & Security**, scroll down and click **Open Anyway**. When asked, allow it to find devices on your **local network**.
+
+If something doesn't work, the log is in `.dvr_nvr_viewer.log` in your home folder.
+
+## Quick start (with Python)
 
 1. Install **Python 3.8+** and **ffmpeg**:
 
@@ -109,6 +129,23 @@ Environment variables `DVR_IP`, `DVR_PORT`, `DVR_USER`, `DVR_PASS`, `DVR_SUB` an
 
 On the page: **L** cycles layouts, **1–9** shows that channel alone, **← →** change page or camera, **Esc** goes back.
 
+## Chrome app (experimental)
+
+`browser-app/` is a second way to watch, with **nothing running on the computer besides Chrome**: no server, no ffmpeg. It's a small Chrome app that talks RTSP to the DVR itself and decodes the H.264/H.265 video with the browser's built-in (hardware) decoder, so you get full quality with almost no CPU.
+
+Normal web pages aren't allowed to open the kind of connection RTSP needs. Chrome only allows it for an installed **Isolated Web App** using its Direct Sockets API, and for now only if you turn on developer mode for those apps:
+
+1. In Chrome, open `chrome://flags/#enable-isolated-web-app-dev-mode`, set it to **Enabled** and restart Chrome.
+2. Download `dvr-cameras.swbn` from the [Releases](https://github.com/tierbuilder/dvr-nvr-viewer/releases) page.
+3. Open `chrome://web-app-internals`, click **Install IWA from Signed Web Bundle** and pick the file.
+4. Open **DVR Cameras** from your apps (Launchpad / Start menu / `chrome://apps`), enter the DVR's address, brand, username and password, and the cameras appear.
+
+It has the same brands, layouts and care for the DVR as the Python app: it checks the login on one camera before opening the others, never retries a rejected password, and hangs up cameras that are hidden or when the window has been in the background for 30 seconds. The password is only stored if you tick **Remember the password**, and then only inside the app's own storage.
+
+**Limits:** Chrome only (Chrome, Edge and other Chromium browsers on desktop), it can't share to phones, and Google still lists Isolated Web Apps as being in development, so the install steps may change.
+
+Building it yourself (needs Node.js 22.13+): `cd tools && npm install && npm run build-app` makes `dist/dvr-cameras.swbn`. The first build creates `tools/signing-key.pem`. Keep that key: it decides the app's identity, and a build signed with another key installs as a different app.
+
 ## Run it all the time (Raspberry Pi or an old PC)
 
 On Raspberry Pi OS, Debian or Ubuntu, the installer sets it up as a service that starts at boot:
@@ -172,6 +209,22 @@ dvr-nvr-viewer aims at the simple case: "show me all my cameras in a browser on 
 
 **Not included:** recording, playback, audio, PTZ control, motion detection.
 
+## Website
+
+`website/` is the download site (home, setup guide, brand list with RTSP addresses), made to be found by search engines and AI assistants. It's served by a Cloudflare Worker, and the free plan is enough: see [website/README.md](website/README.md) to deploy it.
+
+## Building the downloads
+
+`.github/workflows/release.yml` builds them on GitHub for every platform when a version tag is pushed (`git tag v0.3.0 && git push origin v0.3.0`) and attaches them to the release. To build the one for your own computer:
+
+```bash
+pip install pyinstaller imageio-ffmpeg pillow
+python tools/build_exe.py      # makes dist/release/dvr-nvr-viewer-<platform>
+python tools/smoke_test.py     # starts it and checks the page, the video and the Stop button
+```
+
+The downloads include an ffmpeg build from [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) (FFmpeg is licensed under the LGPL/GPL; its source is at [ffmpeg.org](https://ffmpeg.org)).
+
 ## Development
 
 ```bash
@@ -179,6 +232,8 @@ python -m unittest discover -s tests -v
 ```
 
 The tests use fake video (`--test`) and a fake DVR, so they need ffmpeg but no cameras. GitHub Actions runs them on Linux, macOS and Windows.
+
+To try the Chrome app in an ordinary tab, run `python3 tests/browser_harness.py` and open the link it prints. It starts a fake DVR that sends real H.264 over RTSP with Digest login (user `admin`, password `demo123`) and a WebSocket bridge standing in for Direct Sockets.
 
 ## License
 

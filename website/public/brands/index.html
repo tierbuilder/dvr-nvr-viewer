@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTSP URLs for Dahua, Hikvision, TP-Link, Reolink and more</title>
+<meta name="description" content="RTSP address and port for 13 DVR, NVR and camera brands: Dahua, Hikvision, EZVIZ, TP-Link, Reolink, XMEye and more. Free viewer included.">
+<link rel="canonical" href="__ORIGIN__/brands/">
+<meta name="robots" content="index, follow">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="DVR Viewer">
+<meta property="og:title" content="RTSP addresses for every common DVR, NVR and IP camera brand">
+<meta property="og:description" content="Dahua, Hikvision, TP-Link, Reolink, Uniview, Axis and more: the RTSP address and port for each.">
+<meta property="og:url" content="__ORIGIN__/brands/">
+<meta property="og:image" content="__ORIGIN__/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "What is an RTSP address?", "acceptedAnswer": { "@type": "Answer", "text": "It's the address a DVR, NVR or IP camera streams live video on, like rtsp://user:password@192.168.1.64:554/... DVR Viewer builds it for you from the brand, IP address, username and password." } },
+        { "@type": "Question", "name": "My brand isn't listed. Will it work?", "acceptedAnswer": { "@type": "Answer", "text": "Most likely. Many unbranded DVRs are made by Dahua or XMEye manufacturers, so try those presets first. Otherwise choose Other and type the RTSP address from the manual, using {channel} where the camera number goes." } },
+        { "@type": "Question", "name": "Which RTSP port should I use?", "acceptedAnswer": { "@type": "Answer", "text": "Usually 554. Foscam cameras normally use 88. The port is in the DVR's Network menu, often under RTSP." } }
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "DVR Viewer", "item": "__ORIGIN__/" },
+        { "@type": "ListItem", "position": 2, "name": "Brands and RTSP addresses", "item": "__ORIGIN__/brands/" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="mark" href="/" aria-label="DVR Viewer home"><span class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>DVR Viewer</a>
+    <nav aria-label="Main">
+      <a href="/guide/" class="opt">Setup guide</a>
+      <a href="/brands/" aria-current="page" class="opt">Brands</a>
+      <a href="/#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <p class="crumbs"><a href="/">DVR Viewer</a> › Brands</p>
+  <div class="page-head prose">
+    <h1>RTSP addresses for DVR, NVR and IP camera brands</h1>
+    <p class="lede">DVR Viewer has these built in: pick the brand on its setup page and it fills in the address for you.
+      The table is also handy for VLC or any other RTSP player: replace the IP address, USER and PASSWORD with yours.
+      The addresses shown are for camera 1 at full quality.</p>
+  </div>
+  <div class="table-wrap"><table class="stack">
+    <thead><tr><th>Brand</th><th>RTSP address (camera 1, full quality)</th><th>Port</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr id="dahua"><td data-label="Brand"><b>Dahua / Amcrest / Lorex / CP Plus / IMOU</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/cam/realmonitor?channel=1&amp;subtype=0</code></td><td data-label="Port">554</td><td data-label="Notes">DVRs, NVRs and cameras. Tested.</td></tr>
+      <tr id="hikvision"><td data-label="Brand"><b>Hikvision / HiLook / HiWatch / Annke</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/Streaming/Channels/101</code></td><td data-label="Port">554</td><td data-label="Notes">DVRs, NVRs and cameras.</td></tr>
+      <tr id="hikvision-legacy"><td data-label="Brand"><b>EZVIZ / older Hikvision</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/h264/ch1/main/av_stream</code></td><td data-label="Port">554</td><td data-label="Notes">EZVIZ: user admin, password = the 6-letter verification code on the label; turn on LAN Live View in the app.</td></tr>
+      <tr id="tplink-nvr"><td data-label="Brand"><b>TP-Link VIGI NVR</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/live/1/1/avm</code></td><td data-label="Port">554</td><td data-label="Notes">Turn off SRTP on the NVR, or other apps can&#x27;t receive its video.</td></tr>
+      <tr id="tplink-camera"><td data-label="Brand"><b>TP-Link Tapo / VIGI camera</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/stream1</code></td><td data-label="Port">554</td><td data-label="Notes">Single camera: use camera 1. Tapo needs a camera account made in the Tapo app (not your Tapo login).</td></tr>
+      <tr id="reolink"><td data-label="Brand"><b>Reolink NVR / camera</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/Preview_01_main</code></td><td data-label="Port">554</td><td data-label="Notes">On a camera on its own, use camera 1. Avoid special characters in the password.</td></tr>
+      <tr id="uniview"><td data-label="Brand"><b>Uniview (UNV) NVR</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/unicast/c1/s0/live</code></td><td data-label="Port">554</td><td data-label="Notes">NVRs.</td></tr>
+      <tr id="hanwha"><td data-label="Brand"><b>Hanwha / Wisenet / Samsung NVR</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/LiveChannel/0/media.smp</code></td><td data-label="Port">554</td><td data-label="Notes">NVRs; one stream per camera. If it doesn&#x27;t connect, the RTSP port may be the NVR&#x27;s last device port.</td></tr>
+      <tr id="axis"><td data-label="Brand"><b>Axis camera / encoder</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/axis-media/media.amp?camera=1</code></td><td data-label="Port">554</td><td data-label="Notes">One stream per camera; for encoders the camera number is the video input.</td></tr>
+      <tr id="bosch"><td data-label="Brand"><b>Bosch camera</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/?line=1&amp;inst=1</code></td><td data-label="Port">554</td><td data-label="Notes">Single camera: use camera 1 (multi-imager cameras: 1-4). RTSP must be enabled on the camera.</td></tr>
+      <tr id="milesight"><td data-label="Brand"><b>Milesight camera</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:554/main</code></td><td data-label="Port">554</td><td data-label="Notes">Single camera: use camera 1.</td></tr>
+      <tr id="foscam"><td data-label="Brand"><b>Foscam camera</b></td><td data-label="RTSP address"><code>rtsp://USER:PASSWORD@192.168.1.64:88/videoMain</code></td><td data-label="Port">88</td><td data-label="Notes">Single camera: use camera 1. The RTSP port is usually the web port, 88 (some models use 554).</td></tr>
+      <tr id="xmeye"><td data-label="Brand"><b>XMEye / NetSurveillance / generic Chinese DVR</b></td><td data-label="RTSP address"><code>rtsp://192.168.1.64:554/user=USER&amp;password=PASSWORD&amp;channel=1&amp;stream=0.sdp</code></td><td data-label="Port">554</td><td data-label="Notes">DVRs and NVRs.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+  <h2>Placeholders in the addresses</h2>
+  <p><code>{channel}</code> is the camera number (1, 2, 3…), <code>{channel0}</code> counts from 0 and
+    <code>{channel:02d}</code> is two digits (01, 02…). For quality, <code>{sub}</code> is 0 for full and 1 for the
+    lighter stream, <code>{stream}</code> is 1 or 2, and <code>{quality}</code> / <code>{Quality}</code> are
+    main/sub or Main/Sub. Use them with <b>Other</b> on the setup page for brands not listed here.</p>
+  <h2>Questions</h2>
+  <details class="faq"><summary>What is an RTSP address?</summary><p>It&#x27;s the address a DVR, NVR or IP camera streams live video on, like rtsp://user:password@192.168.1.64:554/... DVR Viewer builds it for you from the brand, IP address, username and password.</p></details>
+  <details class="faq"><summary>My brand isn&#x27;t listed. Will it work?</summary><p>Most likely. Many unbranded DVRs are made by Dahua or XMEye manufacturers, so try those presets first. Otherwise choose Other and type the RTSP address from the manual, using {channel} where the camera number goes.</p></details>
+  <details class="faq"><summary>Which RTSP port should I use?</summary><p>Usually 554. Foscam cameras normally use 88. The port is in the DVR&#x27;s Network menu, often under RTSP.</p></details>
+  <p style="margin-top:28px"><a class="btn btn-primary" href="/#download">Download DVR Viewer, free</a></p>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <span>Brand names belong to their owners. DVR Viewer is free, open-source software and not affiliated with any of them.</span>
+    <nav aria-label="Footer">
+      <a href="/">Home</a><a href="/guide/">Setup guide</a>
+      <a href="https://github.com/tierbuilder/dvr-nvr-viewer">Source code</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

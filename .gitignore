@@ -9,3 +9,8 @@ dist/
 # never commit a web access key or DVR settings
 .dvr_nvr_viewer_web_key
 *.env
+# the app signing key decides the installed app's identity: keep it private
+tools/signing-key.pem
+*.pem
+node_modules/
+.wrangler/

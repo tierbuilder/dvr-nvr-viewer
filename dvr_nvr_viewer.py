@@ -39,8 +39,10 @@ Stop it with Ctrl+C.
 import argparse
 import base64
 import getpass
+import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -48,11 +50,12 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 from types import SimpleNamespace
 from urllib.parse import quote, urlsplit, urlunsplit
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # RTSP address styles. Placeholders: {user} {password} {ip} {port}; {channel} counts from 1, {channel0}
 # from 0, and {channel:02d} is zero-padded (01, 02, ...). For the quality: {sub} is 0 = full quality /
@@ -163,49 +166,137 @@ class DvrUnreachable(Exception):
 
 
 def check_login(args, password, ch):
-    """Try the username/password once with a single RTSP request, before opening any camera.
+    """Try the username/password once, with a single RTSP request, before opening any camera.
 
     DVRs lock an account after a few wrong logins, and opening every camera with a wrong
     password would use up those tries at once. Returns True (accepted), False (rejected)
-    or None (couldn't tell, e.g. the DVR wants Digest login).
+    or None (couldn't tell).
     """
     url = source(args, password, ch)[-1]
     parts = urlsplit(url)
     host = parts.hostname
     port = parts.port or 554
     bare = urlunsplit((parts.scheme, f"{host}:{port}", parts.path, parts.query, ""))
-    token = base64.b64encode(f"{args.user}:{password}".encode()).decode()
-    request = (f"DESCRIBE {bare} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n"
-               f"Authorization: Basic {token}\r\nUser-Agent: dvr-nvr-viewer\r\n\r\n")
-    reply = ""
-    for attempt in (1, 2):
-        try:
-            with socket.create_connection((host, port), timeout=15) as s:
-                s.settimeout(15)
-                s.sendall(request.encode())
-                reply = s.recv(4096).decode(errors="replace")
-            break
-        except socket.timeout:
-            # a busy DVR can be slow to answer; a timeout isn't a rejected login, so one more try is safe
-            if attempt == 1:
-                print("The DVR is slow to answer, trying once more...")
-                continue
-            raise DvrUnreachable(f"The DVR at {host}:{port} didn't answer within 15 seconds (twice). "
-                                 "It may be busy (too many viewers or streams at once) or restarting. Close other "
-                                 "viewers (vendor apps, VLC, other copies of this), wait a minute and retry.")
-        except OSError as e:
-            hint = (" On macOS, check System Settings > Privacy & Security > Local Network for the app running this."
-                    if "route" in str(e).lower() else "")
-            raise DvrUnreachable(f"Can't reach the DVR at {host}:{port}: {e}.{hint}")
-    status = reply.split("\r\n", 1)[0].split(" ")
-    code = status[1] if len(status) > 1 else ""
-    if code == "200":
-        return True
-    if code == "401" and "Digest" in reply and "Basic" not in reply:
+
+    def describe(conn, auth=""):
+        cseq = 2 if auth else 1
+        return conn.ask(f"DESCRIBE {bare} RTSP/1.0\r\nCSeq: {cseq}\r\nAccept: application/sdp\r\n"
+                        f"{auth}User-Agent: dvr-nvr-viewer\r\n\r\n")
+
+    with RtspConnection(host, port) as conn:
+        # ask without a login first: that's not a failed login, and the answer says which login the DVR wants
+        code, headers = describe(conn)
+        if code == "200":
+            return True
+        if code != "401":
+            return None
+        challenges = [v for k, v in headers if k == "www-authenticate"]
+        digest = next((c for c in challenges if c.lower().startswith("digest")), None)
+        if digest:
+            auth = digest_auth(digest, args.user, password, "DESCRIBE", bare)
+            if auth is None:
+                return None
+        elif any(c.lower().startswith("basic") for c in challenges):
+            auth = "Basic " + base64.b64encode(f"{args.user}:{password}".encode()).decode()
+        else:
+            return None
+        # the one real try, on the same connection: some DVRs only accept the answer to their own challenge there
+        code, _ = describe(conn, f"Authorization: {auth}\r\n")
+    return True if code == "200" else False if code == "401" else None
+
+
+class RtspConnection:
+    """One connection to the DVR for asking RTSP questions; reconnects if the DVR hung up in between."""
+
+    def __init__(self, host, port):
+        self.host, self.port, self.sock = host, port, None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if self.sock:
+            self.sock.close()
+
+    def ask(self, request):
+        """Sends one request; returns the status code and the headers of the answer."""
+        for attempt in (1, 2):
+            try:
+                if self.sock is None:
+                    self.sock = socket.create_connection((self.host, self.port), timeout=15)
+                    self.sock.settimeout(15)
+                self.sock.sendall(request.encode())
+                reply = b""
+                while b"\r\n\r\n" not in reply and len(reply) < 65536:
+                    chunk = self.sock.recv(4096)
+                    if not chunk:
+                        break
+                    reply += chunk
+                if reply:
+                    break
+                self.sock.close()  # the DVR closed the connection: ask again on a new one
+                self.sock = None
+                if attempt == 2:
+                    raise DvrUnreachable(f"The DVR at {self.host}:{self.port} closed the connection without answering.")
+            except socket.timeout:
+                # a busy DVR can be slow to answer; a timeout isn't a rejected login, so one more try is safe
+                if self.sock:
+                    self.sock.close()
+                    self.sock = None
+                if attempt == 1:
+                    print("The DVR is slow to answer, trying once more...")
+                    continue
+                raise DvrUnreachable(f"The DVR at {self.host}:{self.port} didn't answer within 15 seconds (twice). "
+                                     "It may be busy (too many viewers or streams at once) or restarting. Close other "
+                                     "viewers (vendor apps, VLC, other copies of this), wait a minute and retry.")
+            except ConnectionRefusedError:
+                raise DvrUnreachable(f"Something is at {self.host}, but nothing answers on port {self.port}. "
+                                     "Check the RTSP port (usually 554), and that RTSP is turned on in the DVR's "
+                                     "network settings.")
+            except OSError as e:
+                hint = (" On macOS, check System Settings > Privacy & Security > Local Network for the app running this."
+                        if "route" in str(e).lower() else "")
+                reason = getattr(e, "strerror", None) or str(e)
+                raise DvrUnreachable(f"Can't reach the DVR at {self.host}:{self.port} ({reason}). Check the IP address, "
+                                     f"and that this computer is on the same network as the DVR.{hint}")
+        first, *lines = reply.decode(errors="replace").split("\r\n\r\n", 1)[0].split("\r\n")
+        status = first.split(" ")
+        headers = [(k.strip().lower(), v.strip()) for k, _, v in (l.partition(":") for l in lines) if v]
+        return (status[1] if len(status) > 1 else ""), headers
+
+
+def digest_auth(challenge, user, password, method, uri):
+    """The Authorization header for an RTSP Digest login (RFC 2617), or None for an unknown kind."""
+    p = {k.lower(): (q if q else u) for k, q, u in re.findall(r'(\w+)=(?:"([^"]*)"|([^,\s]*))', challenge)}
+    if p.get("algorithm", "MD5").upper() != "MD5" or "nonce" not in p:
         return None
-    if code == "401":
-        return False
-    return None
+    md5 = lambda text: hashlib.md5(text.encode()).hexdigest()  # noqa: E731
+    ha1, ha2 = md5(f"{user}:{p.get('realm', '')}:{password}"), md5(f"{method}:{uri}")
+    fields = f'username="{user}", realm="{p.get("realm", "")}", nonce="{p["nonce"]}", uri="{uri}"'
+    if "auth" in [q.strip() for q in p.get("qop", "").split(",")]:
+        cnonce = os.urandom(8).hex()
+        response = md5(f"{ha1}:{p['nonce']}:00000001:{cnonce}:auth:{ha2}")
+        fields += f', qop=auth, nc=00000001, cnonce="{cnonce}"'
+    else:
+        response = md5(f"{ha1}:{p['nonce']}:{ha2}")
+    fields += f', response="{response}"'
+    if "opaque" in p:
+        fields += f', opaque="{p["opaque"]}"'
+    return "Digest " + fields
+
+
+FROZEN = getattr(sys, "frozen", False)  # running as the downloadable app (built by PyInstaller), not from Python
+FFMPEG = "ffmpeg"
+
+
+def find_ffmpeg():
+    """The ffmpeg to use: the one inside the downloadable app, else $DVR_FFMPEG, else the one on PATH."""
+    if FROZEN:
+        name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+        bundled = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)), name)
+        if os.path.exists(bundled):
+            return bundled
+    return os.environ.get("DVR_FFMPEG") or shutil.which("ffmpeg")
 
 
 def relay_masked(stream, secrets, prefix="", on_line=None):
@@ -222,6 +313,8 @@ def relay_masked(stream, secrets, prefix="", on_line=None):
 
 
 def start(cmd, secrets, prefix="", on_line=None, **kw):
+    if os.name == "nt":  # don't flash up a console window for every camera
+        kw.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
     proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, **kw)
     threading.Thread(target=relay_masked, args=(proc.stderr, secrets, prefix, on_line), daemon=True).start()
     return proc
@@ -255,6 +348,7 @@ def stop(procs):
 IDLE_STOP = 30      # seconds after the last viewer leaves before a camera stream is closed
 WEB_FPS = 15        # most frames per second sent to each browser
 KEY_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer_web_key")
+LOG_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer.log")
 ADMIN_KEY_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer_admin_key")
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".dvr_nvr_viewer.json")  # settings made on the setup page
 BRAND_LABELS = [(key, label) for key, label, _, _, _ in BRAND_LIST] + [("custom", "Other: enter the RTSP address")]
@@ -432,6 +526,28 @@ def can_open_browser():
     return True
 
 
+def already_running(port):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/hello", timeout=2) as r:
+            return r.read(64) == b"dvr-nvr-viewer"
+    except (OSError, ValueError):
+        return False
+
+
+def error_step(error):
+    """Which setup step to reopen so the user lands on the field the error is about."""
+    e = error.lower()
+    if not e:
+        return 1
+    if "custom address" in e or "brand" in e or "rtsp://" in e:
+        return 1
+    if "camera" in e and "password" not in e or "channel" in e:
+        return 4
+    if "password" in e or "username" in e or "rejected" in e:
+        return 3
+    return 2  # address, port, or the DVR not answering
+
+
 def run_server(args, cfg, password, draft=None):
     """Serve the viewer. cfg is None until the DVR is set up (then /setup asks for it).
     draft: saved settings to pre-fill the setup page with when they couldn't be used as they are."""
@@ -452,7 +568,7 @@ def run_server(args, cfg, password, draft=None):
         def make_cmd():
             *opts, src = source(cfg, password, ch, 0 if quality == "main" else default_sub())
             vf = "scale='min(1280,iw)':-2," if quality == "main" else ""
-            return ["ffmpeg", "-hide_banner", "-loglevel", "error", *opts, "-i", src, "-an",
+            return [FFMPEG, "-hide_banner", "-loglevel", "error", *opts, "-i", src, "-an",
                     # old DVRs send frames with repeated timestamps, so renumber them in milliseconds
                     # (plain frame numbers get rounded to the same value and crash the JPEG encoder)
                     "-vf", vf + "setpts=N/(1000*TB)", "-enc_time_base:v", "1/1000", "-fps_mode", "passthrough",
@@ -528,6 +644,8 @@ def run_server(args, cfg, password, draft=None):
         def do_GET(self):
             parts = urlsplit(self.path)
             query = parse_qs(parts.query)
+            if parts.path == "/hello":  # lets a second copy find this one
+                return self.send(200, "dvr-nvr-viewer", "text/plain")
             if "admin" in query:
                 if not self.matches(query["admin"][0], admin_key):
                     return self.message_page(403, "Wrong admin link", "Open the admin link exactly as dvr-nvr-viewer printed it.")
@@ -592,6 +710,8 @@ def run_server(args, cfg, password, draft=None):
                 "__PW_HINT__": "leave empty to keep the current one" if have_password else "",
                 "__MAIN__": " checked" if v["main"] else "", "__REMEMBER__": " checked" if v["remember"] else "",
                 "__BACK__": '<a href="/">Back to the cameras</a>' if cfg is not None else "",
+                "__START__": str(error_step(error)), "__PW_REQUIRED__": "" if have_password else " required",
+                "__SHARE_OPEN__": " open" if cfg is not None else "",
                 "__SHARE__": html.escape(links.get("view", "")), "__ADMIN__": html.escape(links.get("admin", "")),
             }
             page = SETUP_PAGE
@@ -600,7 +720,8 @@ def run_server(args, cfg, password, draft=None):
             self.send(200, page)
 
         def do_POST(self):
-            if urlsplit(self.path).path != "/setup":
+            path = urlsplit(self.path).path
+            if path not in ("/setup", "/quit"):
                 return self.send(404, "Not found", "text/plain")
             if not self.is_admin({}):
                 return self.message_page(403, "Settings are for the admin", "This needs the admin link.")
@@ -613,6 +734,12 @@ def run_server(args, cfg, password, draft=None):
             form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode(errors="replace")).items()}
             if not self.matches(form.get("token", ""), form_token):
                 return self.message_page(403, "Blocked", "This form is out of date. Go back, reload the page and try again.")
+            if path == "/quit":
+                print("Stopped from the setup page.")
+                self.message_page(200, "Stopped", "dvr-nvr-viewer has stopped and closed every camera stream. "
+                                  "Start it again to watch.")
+                threading.Thread(target=server.shutdown, daemon=True).start()
+                return
             values = {k: form.get(k, "").strip() for k in ("ip", "brand", "port", "user", "channels", "url_template")}
             values.update(main=form.get("main") == "on", remember=form.get("remember") == "on")
             password = form.get("password", "")
@@ -698,6 +825,12 @@ def run_server(args, cfg, password, draft=None):
             finally:
                 src.release()
 
+    if already_running(args.web_port):
+        # double-clicked again: show the copy that's running instead of starting a second one
+        print(f"dvr-nvr-viewer is already running: http://127.0.0.1:{args.web_port}/")
+        if not args.no_browser and can_open_browser():
+            webbrowser.open(f"http://127.0.0.1:{args.web_port}/")
+        return
     server = None
     for port in range(args.web_port, args.web_port + 20):
         try:
@@ -734,7 +867,8 @@ def run_server(args, cfg, password, draft=None):
               f"(delete {os.path.basename(KEY_FILE)} or {os.path.basename(ADMIN_KEY_FILE)} for new ones).")
     if shared:
         print("Only use this on your home network: don't port-forward it to the internet.")
-    print("Keep this running while people are watching; Ctrl+C stops it.")
+    print("Keep this running while people are watching; " +
+          ("the Stop button on the setup page stops it." if FROZEN else "Ctrl+C stops it."))
     if not args.no_browser and can_open_browser():
         if args.no_local_admin:
             webbrowser.open(links["admin"] if cfg is None else f"{local}/?key={view_key}")
@@ -779,6 +913,45 @@ PAGE_STYLE = r"""
   .links { margin-top: 22px; font-size: 13px; color: var(--muted); word-break: break-all; }
   .links code { color: var(--text); }
   .hidden { display: none; }
+  .stop { background: none; border: 0; padding: 0; margin-top: 18px; }
+  button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--line); margin: 0 0 6px; }
+"""
+SETUP_STYLE = r"""
+  .brandbar { display: flex; gap: 14px; align-items: center; margin-bottom: 20px; }
+  .brandbar h1 { margin: 0; }
+  .brandbar .sub { margin: 0; font-size: 14px; }
+  .logo { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; width: 42px; height: 42px; padding: 7px;
+    background: #1d2633; border-radius: 10px; flex: none; }
+  .logo i { background: var(--accent); border-radius: 2px; }
+  .steps { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 0;
+    margin: 0 0 16px; font-size: 13px; color: var(--muted); }
+  .steps li { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 3px solid var(--line);
+    cursor: default; }
+  .steps li b { font-weight: 600; font-size: 11px; letter-spacing: .04em; }
+  .steps li.done { border-color: var(--accent); color: var(--text); cursor: pointer; }
+  .steps li.active { border-color: var(--accent); color: var(--text); font-weight: 600; }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  fieldset + fieldset { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+  legend { font-size: 18px; font-weight: 650; padding: 0; margin-bottom: 6px; }
+  .lead { font-size: 14px; margin: 0 0 4px; }
+  .lead b { color: var(--text); font-weight: 600; }
+  .nav { display: flex; gap: 10px; margin-top: 22px; }
+  .nav button { margin: 0; flex: 1; }
+  .nav button[hidden] { display: none; }
+  .nav button.secondary { flex: 0 0 auto; width: auto; padding: 12px 18px; }
+  html.js fieldset.step { display: none; }
+  html.js fieldset.step.active { display: block; margin: 0; padding: 0; border: 0; }
+  html:not(.js) .nav #back, html:not(.js) .nav #next { display: none; }
+  html:not(.js) .steps { display: none; }
+  .share { margin-top: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 18px; }
+  .share summary { cursor: pointer; font-weight: 600; }
+  .share p { font-size: 14px; margin: 12px 0 6px; }
+  .copy { display: flex; gap: 8px; align-items: center; }
+  .copy code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; background: var(--field);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .copy button { width: auto; margin: 0; padding: 8px 14px; flex: none; }
+  .error { margin: 0 0 16px; }
 """
 
 MESSAGE_PAGE = r"""<!doctype html>
@@ -791,53 +964,91 @@ MESSAGE_PAGE = r"""<!doctype html>
 SETUP_PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DVR settings</title><style>""" + PAGE_STYLE + r"""</style></head>
+<title>DVR Viewer setup</title><style>""" + PAGE_STYLE + SETUP_STYLE + r"""</style></head>
 <body><main>
-<h1>Connect to your DVR / NVR</h1>
-<p>Enter the details you'd use in the DVR's own app. The login is checked once; if the DVR rejects it,
-nothing is retried, so the account can't get locked. __BACK__</p>
+<div class="brandbar"><span class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+  <div><h1>DVR Viewer setup</h1><p class="sub">Free and open source. Runs only on this computer. __BACK__</p></div></div>
+<ol class="steps" id="steps" aria-label="Setup steps">
+  <li data-step="1"><b>1</b>Brand</li><li data-step="2"><b>2</b>Address</li>
+  <li data-step="3"><b>3</b>Login</li><li data-step="4"><b>4</b>Cameras</li>
+</ol>
 __ERROR__
-<form method="post" action="/setup" id="f">
+<form method="post" action="/setup" id="f" data-start="__START__" novalidate>
   <input type="hidden" name="token" value="__TOKEN__">
-  <div class="row">
-    <div><label for="ip">Address <span class="hint">IP or name, e.g. 192.168.1.64</span></label>
-      <input type="text" id="ip" name="ip" value="__IP__" required autocomplete="off" inputmode="url"></div>
-    <div><label for="port">RTSP port <span class="hint">usually 554</span></label>
-      <input type="text" id="port" name="port" value="__PORT__" inputmode="numeric"></div>
+  <fieldset class="step" data-step="1">
+    <legend>Which brand is your DVR or camera?</legend>
+    <p class="lead">It's usually printed on the front of the recorder or in its menu. Unbranded DVRs
+      often work as <b>Dahua</b> or <b>XMEye</b>.</p>
+    <label for="brand">Brand</label>
+    <select id="brand" name="brand">__BRANDS__</select>
+    <span class="hint" id="brandhint"></span>
+    <div id="tpl" class="hidden">
+      <label for="url_template">RTSP address <span class="hint">placeholders: {user} {password} {ip} {port};
+        {channel} (from 1), {channel0} (from 0) or {channel:02d} (01, 02, ...); quality as {sub} (0 = full,
+        1 = lighter), {stream} (1 = full, 2 = lighter), {quality} (main / sub) or {Quality} (Main / Sub)</span></label>
+      <input type="text" id="url_template" name="url_template" value="__TEMPLATE__" autocomplete="off"
+        placeholder="rtsp://{user}:{password}@{ip}:{port}/ch{channel}/{stream}">
+    </div>
+  </fieldset>
+  <fieldset class="step" data-step="2">
+    <legend>Where is it on your network?</legend>
+    <p class="lead">Find the IP address in the DVR's menu under <b>Network</b>, or in your router's list of
+      connected devices. The RTSP port is almost always the one filled in.</p>
+    <div class="row">
+      <div><label for="ip">IP address</label>
+        <input type="text" id="ip" name="ip" value="__IP__" required autocomplete="off" inputmode="url"
+          placeholder="192.168.1.64"></div>
+      <div><label for="port">RTSP port</label>
+        <input type="text" id="port" name="port" value="__PORT__" required inputmode="numeric" pattern="[0-9]+"></div>
+    </div>
+  </fieldset>
+  <fieldset class="step" data-step="3">
+    <legend>How do you log in to it?</legend>
+    <p class="lead">The same username and password as the DVR's own app. It's checked once: a wrong password is
+      never retried, so the DVR won't lock you out.</p>
+    <label for="user">Username</label>
+    <input type="text" id="user" name="user" value="__USER__" required autocomplete="username" autocapitalize="off"
+      spellcheck="false">
+    <label for="password">Password <span class="hint">__PW_HINT__</span></label>
+    <input type="password" id="password" name="password" autocomplete="current-password"__PW_REQUIRED__>
+    <label class="check"><input type="checkbox" name="remember"__REMEMBER__>
+      <span>Remember the password on this computer <span class="hint">So it reconnects by itself after a
+      restart. Stored in a file only your user account can read.</span></span></label>
+  </fieldset>
+  <fieldset class="step" data-step="4">
+    <legend>Which cameras do you want to see?</legend>
+    <p class="lead">Camera numbers as the DVR counts them. Cameras that aren't connected just show as
+      "connecting", so it's fine to list all of them.</p>
+    <label for="channels">Cameras <span class="hint">e.g. 1-8, or 1 2 4 5 6</span></label>
+    <input type="text" id="channels" name="channels" value="__CHANNELS__" required>
+    <label class="check"><input type="checkbox" name="main"__MAIN__>
+      <span>Full quality for every camera <span class="hint">Uses much more network and CPU. Otherwise only the
+      camera you enlarge is full quality.</span></span></label>
+  </fieldset>
+  <div class="nav">
+    <button type="button" id="back" class="secondary">Back</button>
+    <button type="button" id="next">Next</button>
+    <button type="submit" id="go">Save and connect</button>
   </div>
-  <label for="brand">Brand</label>
-  <select id="brand" name="brand">__BRANDS__</select>
-  <span class="hint" id="brandhint"></span>
-  <div id="tpl" class="hidden">
-    <label for="url_template">RTSP address <span class="hint">placeholders: {user} {password} {ip} {port};
-      {channel} (from 1), {channel0} (from 0) or {channel:02d} (01, 02, ...); quality as {sub} (0 = full,
-      1 = lighter), {stream} (1 = full, 2 = lighter), {quality} (main / sub) or {Quality} (Main / Sub)</span></label>
-    <input type="text" id="url_template" name="url_template" value="__TEMPLATE__" autocomplete="off"
-      placeholder="rtsp://{user}:{password}@{ip}:{port}/ch{channel}/{stream}">
-  </div>
-  <label for="user">Username</label>
-  <input type="text" id="user" name="user" value="__USER__" required autocomplete="username">
-  <label for="password">Password <span class="hint">__PW_HINT__</span></label>
-  <input type="password" id="password" name="password" autocomplete="current-password">
-  <label for="channels">Cameras <span class="hint">channel numbers, e.g. 1-8 or 1 2 4 5 6</span></label>
-  <input type="text" id="channels" name="channels" value="__CHANNELS__" required>
-  <label class="check"><input type="checkbox" name="main"__MAIN__>
-    <span>Full quality for every camera <span class="hint">Uses much more network and CPU. Otherwise only
-    enlarged cameras are full quality.</span></span></label>
-  <label class="check"><input type="checkbox" name="remember"__REMEMBER__>
-    <span>Remember the password on this computer <span class="hint">So it reconnects after a restart.
-    Stored in a file only your user account can read.</span></span></label>
-  <button type="submit" id="go">Save and connect</button>
 </form>
-<div class="links">
-  Watch link for other devices: <code>__SHARE__</code><br>
-  Admin link (to change these settings from another device; keep it private): <code>__ADMIN__</code>
-</div>
+<details class="share"__SHARE_OPEN__>
+  <summary>Watch on phones, tablets and other computers</summary>
+  <p>Open this link on any device connected to the same Wi-Fi or network:</p>
+  <div class="copy"><code id="viewlink">__SHARE__</code><button type="button" data-copy="viewlink">Copy</button></div>
+  <p>Admin link, to change these settings from another device. Keep it to yourself:</p>
+  <div class="copy"><code id="adminlink">__ADMIN__</code><button type="button" data-copy="adminlink">Copy</button></div>
+</details>
+<form method="post" action="/quit" class="stop">
+  <input type="hidden" name="token" value="__TOKEN__">
+  <button type="submit" class="secondary">Stop DVR Viewer</button>
+  <span class="hint">Closes every camera stream and stops sharing. Start the app again to watch.</span>
+</form>
 <script>
 const HINTS = __HINTS__;
+const form = document.getElementById("f"), steps = [...form.querySelectorAll(".step")];
 const brand = document.getElementById("brand"), tpl = document.getElementById("tpl");
 const port = document.getElementById("port"), hint = document.getElementById("brandhint");
-let shown = brand.value;
+let shown = brand.value, at = Math.min(Math.max(+form.dataset.start || 1, 1), steps.length);
 function showBrand() {
   tpl.classList.toggle("hidden", brand.value !== "custom");
   hint.textContent = (HINTS[brand.value] || {}).hint || "";
@@ -847,9 +1058,57 @@ function showBrand() {
   shown = brand.value;
 }
 brand.addEventListener("change", showBrand); showBrand();
-document.getElementById("f").addEventListener("submit", () => {
+document.getElementById("url_template").required = false;
+
+// one question at a time; without JavaScript every step simply shows at once
+document.documentElement.classList.add("js");
+function go(n) {
+  at = n;
+  steps.forEach(s => s.classList.toggle("active", +s.dataset.step === at));
+  document.querySelectorAll("#steps li").forEach(li => {
+    li.classList.toggle("active", +li.dataset.step === at);
+    li.classList.toggle("done", +li.dataset.step < at);
+  });
+  document.getElementById("back").hidden = at === 1;
+  document.getElementById("next").hidden = at === steps.length;
+  document.getElementById("go").hidden = at !== steps.length;
+  const first = steps[at - 1].querySelector("input:not([type=hidden]):not([type=checkbox]), select");
+  if (first && document.activeElement !== document.body) first.focus();
+}
+function stepOk() {
+  const tplInput = document.getElementById("url_template");
+  tplInput.required = brand.value === "custom" && at === 1;
+  for (const el of steps[at - 1].querySelectorAll("input, select")) {
+    if (!el.checkValidity()) { el.reportValidity(); return false; }
+  }
+  if (at === 1 && brand.value === "custom" && !/^rtsps?:\/\//.test(tplInput.value.trim())) {
+    tplInput.setCustomValidity("Start the address with rtsp://"); tplInput.reportValidity();
+    tplInput.setCustomValidity(""); return false;
+  }
+  return true;
+}
+document.getElementById("next").onclick = () => { if (stepOk()) go(at + 1); };
+document.getElementById("back").onclick = () => go(at - 1);
+document.querySelectorAll("#steps li").forEach(li => li.addEventListener("click", () => {
+  const n = +li.dataset.step;
+  if (n < at || (n === at + 1 && stepOk())) go(n);
+}));
+form.addEventListener("keydown", e => { // Enter moves on to the next question instead of sending half a form
+  if (e.key === "Enter" && e.target.tagName === "INPUT" && at < steps.length) {
+    e.preventDefault(); document.getElementById("next").click();
+  }
+});
+form.addEventListener("submit", e => {
+  if (!stepOk()) { e.preventDefault(); return; }
   const b = document.getElementById("go"); b.disabled = true; b.textContent = "Checking the login…";
 });
+document.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", async () => {
+  const text = document.getElementById(b.dataset.copy).textContent;
+  try { await navigator.clipboard.writeText(text); b.textContent = "Copied"; }
+  catch (e) { getSelection().selectAllChildren(document.getElementById(b.dataset.copy)); b.textContent = "Press Ctrl+C"; }
+  setTimeout(() => { b.textContent = "Copy"; }, 2000);
+}));
+go(at);
 </script>
 </main></body></html>
 """
@@ -1064,8 +1323,14 @@ def main():
     for name in ("SIGTERM", "SIGHUP"):
         if hasattr(signal, name):  # Windows has no SIGHUP
             signal.signal(getattr(signal, name), quit_on_signal)
+    if FROZEN and (sys.stdout is None or not sys.stdout.isatty()):
+        # started by double-click, with no terminal to print to: keep a log instead
+        sys.stdout = sys.stderr = open(LOG_FILE, "a", buffering=1, encoding="utf-8", errors="replace")
+        print(f"\n--- dvr-nvr-viewer {__version__} started {time.strftime('%Y-%m-%d %H:%M:%S')}")
     args = parse_args()
-    if not shutil.which("ffmpeg"):
+    global FFMPEG
+    FFMPEG = find_ffmpeg()
+    if not FFMPEG:
         sys.exit("ffmpeg not found. Install it (macOS: brew install ffmpeg, Windows: winget install Gyan.FFmpeg,\n"
                  "Linux: sudo apt install ffmpeg) and try again.")
 

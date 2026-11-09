@@ -1,0 +1,15 @@
+// Deploy with: npx wrangler deploy   (see README.md in this folder)
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dvr-viewer",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+    "run_worker_first": true
+  },
+  "observability": { "enabled": true }
+}

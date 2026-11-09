@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DVR Cameras</title>
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<section id="setup" class="hidden">
+  <main>
+    <h1>Connect to your DVR</h1>
+    <p>Enter the DVR or camera's address and login. The video comes straight from the DVR to this app: nothing else needs to run.</p>
+    <form id="form" autocomplete="off">
+      <label for="brand">Brand</label>
+      <select id="brand"></select>
+      <span class="hint" id="brandhint"></span>
+      <label for="template" id="templatelabel" class="hidden">RTSP address
+        <span class="hint">Placeholders: {user} {password} {ip} {port} {channel} {channel0} {channel:02d} {sub} {stream} {quality} {Quality}</span></label>
+      <input type="text" id="template" class="hidden" spellcheck="false">
+      <div class="row">
+        <div><label for="ip">IP address</label><input type="text" id="ip" placeholder="192.168.1.64" required spellcheck="false"></div>
+        <div><label for="port">RTSP port</label><input type="text" id="port" inputmode="numeric" required></div>
+      </div>
+      <label for="user">Username</label>
+      <input type="text" id="user" required spellcheck="false" autocapitalize="off">
+      <label for="password">Password</label>
+      <input type="password" id="password">
+      <label class="check"><input type="checkbox" id="remember"> Remember the password on this computer
+        <span class="hint">Otherwise you'll be asked each time the app opens.</span></label>
+      <label for="channels">Cameras <span class="hint">e.g. 1-8, or 1 2 4 5 6</span></label>
+      <input type="text" id="channels" value="1-4" required>
+      <label class="check"><input type="checkbox" id="allmain"> Full quality for every camera
+        <span class="hint">Otherwise small tiles use the lighter stream, which is easier on the DVR.</span></label>
+      <div id="error" class="error hidden" role="alert"></div>
+      <button type="submit" id="save">Connect</button>
+      <button type="button" id="cancel" class="secondary hidden">Cancel</button>
+    </form>
+  </main>
+</section>
+
+<section id="nosockets" class="hidden">
+  <main>
+    <h1>Install this as an app first</h1>
+    <p>Browsers only let installed apps talk to a DVR directly. Open this page from the installed
+      "DVR Cameras" app (see the README for the one-time install), not from a normal tab.</p>
+  </main>
+</section>
+
+<section id="viewer" class="hidden">
+  <header>
+    <h1 id="title">DVR</h1>
+    <div class="btns" id="layouts"></div>
+    <div class="btns">
+      <button id="prev" title="Previous">◀</button><button id="next" title="Next">▶</button>
+      <button id="fs" title="Fullscreen">⛶</button>
+      <button id="settings" title="DVR settings">⚙</button>
+    </div>
+  </header>
+  <div id="wall"></div>
+  <footer>Tap a camera to make it big · double-tap for just that camera · ◀ ▶ for pages or cameras</footer>
+</section>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

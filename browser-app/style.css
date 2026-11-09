@@ -1,0 +1,47 @@
+:root { --bg: #0b0d10; --panel: #15181d; --field: #0f1216; --line: #333a43; --text: #e8eaed;
+  --muted: #9aa0a6; --accent: #4f8cff; --warn: #ffb020; --error: #ff6b6b; --gap: 4px; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.hidden { display: none !important; }
+
+/* setup */
+main { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+p { color: var(--muted); margin: 0 0 16px; }
+form { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+label { display: block; font-weight: 600; margin: 14px 0 4px; }
+.hint { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+#brandhint { margin-top: 6px; }
+input[type=text], input[type=password], select { width: 100%; padding: 10px 12px; font: inherit;
+  color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 6px; }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; margin-top: 12px; flex-wrap: wrap; }
+.check input { margin-top: 4px; }
+.check .hint { flex-basis: 100%; padding-left: 22px; }
+.row { display: grid; grid-template-columns: 1fr 110px; gap: 12px; }
+form button { margin-top: 18px; width: 100%; padding: 12px; font-weight: 600; color: #fff;
+  background: var(--accent); border: 0; }
+form button.secondary { margin-top: 8px; background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.error { color: var(--error); background: rgba(255,107,107,.1); border: 1px solid rgba(255,107,107,.4);
+  border-radius: 6px; padding: 10px 12px; margin-top: 14px; }
+
+/* cameras */
+#viewer { height: 100%; display: flex; flex-direction: column; font-size: 14px; }
+header { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top)); background: var(--panel); flex-wrap: wrap; }
+header h1 { font-size: 15px; font-weight: 600; margin: 0 auto 0 0; white-space: nowrap; }
+.btns { display: flex; gap: 4px; flex-wrap: wrap; }
+button { background: #252a31; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 10px; font: inherit; cursor: pointer; }
+button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+#wall { flex: 1; display: grid; gap: var(--gap); padding: var(--gap); min-height: 0; }
+.tile { position: relative; background: #000; overflow: hidden; border-radius: 4px; min-height: 0; cursor: pointer; }
+.tile canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+.tile .cap { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.6); padding: 2px 6px;
+  border-radius: 4px; font-size: 12px; pointer-events: none; }
+.tile .cap.warn { color: var(--warn); }
+.tile .cap.error { color: var(--error); }
+.tile.big { outline: 2px solid var(--accent); outline-offset: -2px; }
+footer { color: var(--muted); font-size: 12px; padding: 4px 12px; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+@media (max-width: 640px) { footer { display: none; } header h1 { width: 100%; } }

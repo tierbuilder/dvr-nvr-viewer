@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DVR Viewer: watch DVR & NVR cameras in any browser, free</title>
+<meta name="description" content="Free app to watch all your DVR, NVR and IP cameras at once in any browser, on computers and phones. No plugin, ActiveX, cloud or account.">
+<link rel="canonical" href="__ORIGIN__/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#0b0d10">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="DVR Viewer">
+<meta property="og:title" content="DVR Viewer – watch your DVR/NVR cameras in any browser, free">
+<meta property="og:description" content="Old DVR asking for an NPAPI or ActiveX plugin? DVR Viewer shows every camera in any browser, on any device. Free and open source.">
+<meta property="og:url" content="__ORIGIN__/">
+<meta property="og:image" content="__ORIGIN__/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" type="text/plain" title="Summary for AI assistants" href="/llms.txt">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "__ORIGIN__/#app",
+      "name": "DVR Viewer",
+      "alternateName": "dvr-nvr-viewer",
+      "description": "Free, open-source app that shows all cameras of a DVR, NVR or IP camera at once in any web browser, on computers, phones and tablets, without browser plugins, ActiveX or a cloud account.",
+      "applicationCategory": "MultimediaApplication",
+      "applicationSubCategory": "CCTV / video surveillance viewer",
+      "operatingSystem": "Windows 10, Windows 11, macOS, Linux, Raspberry Pi OS",
+      "softwareVersion": "0.3.0",
+      "isAccessibleForFree": true,
+      "license": "https://opensource.org/licenses/MIT",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "downloadUrl": "__ORIGIN__/#download",
+      "installUrl": "__ORIGIN__/guide/",
+      "url": "__ORIGIN__/",
+      "image": "__ORIGIN__/og.png",
+      "sameAs": ["https://github.com/tierbuilder/dvr-nvr-viewer"],
+      "featureList": [
+        "Watch every camera at once: grid, 2x2, 3x3, 1+5, 1+7 and single-camera layouts",
+        "Works in any browser on Windows, macOS, Linux, Android and iPhone",
+        "Set up from a web page: brand, IP address, username, password",
+        "Share a link with other devices on the same network",
+        "No browser plugin, ActiveX, NPAPI or cloud account",
+        "Never retries a wrong password, so the DVR doesn't lock the account",
+        "Supports Dahua, Hikvision, EZVIZ, TP-Link VIGI and Tapo, Reolink, Uniview, Hanwha, Axis, Bosch, Milesight, Foscam, XMEye and any RTSP camera"
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "__ORIGIN__/#site",
+      "name": "DVR Viewer",
+      "url": "__ORIGIN__/"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Is DVR Viewer really free?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. It's free and open source (MIT license). There's no account, no subscription, no ads and no cloud service." } },
+        { "@type": "Question", "name": "My old DVR's web page asks for an NPAPI or ActiveX plugin. Will this work?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes, that's what it was made for. DVR Viewer reads the cameras over RTSP, which almost every DVR and NVR supports, and shows them in a normal web page, so no plugin is needed." } },
+        { "@type": "Question", "name": "Does my video go to the internet or a cloud server?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. The app runs on your own computer and talks to the DVR on your home network. Video and passwords never leave your network." } },
+        { "@type": "Question", "name": "Can I watch on my phone?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. Run DVR Viewer on one computer (or a Raspberry Pi) and open the link it shows on any phone or tablet on the same Wi-Fi. Nothing needs to be installed on the phone." } },
+        { "@type": "Question", "name": "Which DVR and camera brands work?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Any DVR, NVR or IP camera with RTSP. Built-in presets cover Dahua, Amcrest, Lorex, CP Plus, IMOU, Hikvision, HiLook, Annke, EZVIZ, TP-Link VIGI and Tapo, Reolink, Uniview, Hanwha/Wisenet, Axis, Bosch, Milesight, Foscam and XMEye; other brands can type their RTSP address." } },
+        { "@type": "Question", "name": "Why does Windows or macOS warn me when I first open it?",
+          "acceptedAnswer": { "@type": "Answer", "text": "The download isn't signed with a paid Apple or Microsoft certificate, so the system asks once. On Windows click More info, then Run anyway. On a Mac open System Settings > Privacy & Security and click Open Anyway. The full source code is public on GitHub." } }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="mark" href="/" aria-label="DVR Viewer home"><span class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>DVR Viewer</a>
+    <nav aria-label="Main">
+      <a href="/guide/" class="opt">Setup guide</a>
+      <a href="/brands/" class="opt">Brands</a>
+      <a href="#faq" class="opt">FAQ</a>
+      <a href="https://github.com/tierbuilder/dvr-nvr-viewer">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <span class="pill">✓ Free &amp; open source · no account · no cloud</span>
+      <h1>See all your DVR cameras in any browser.</h1>
+      <p class="lede">Old DVR or NVR asking for an <b>NPAPI or ActiveX plugin</b>? DVR Viewer shows every camera at once
+        in Chrome, Safari, Edge or Firefox, on your computer and on every phone in the house. Download, double-click,
+        enter your DVR's IP and password. That's it.</p>
+      <div class="cta">
+        <a class="btn btn-primary" id="hero-dl" href="#download">Download free<small id="hero-os"></small></a>
+        <a class="btn btn-ghost" href="/guide/">See how it works</a>
+      </div>
+      <p class="cta-note">Windows · macOS · Linux · Raspberry Pi &nbsp;·&nbsp; Phones and tablets watch through a link</p>
+    </div>
+    <figure class="screen" aria-label="Picture of the DVR Viewer camera wall: one big camera and five small ones">
+      <div class="bar"><span class="on">1+5</span><span>grid</span><span>2×2</span><span>1</span></div>
+      <div class="wall">
+        <div class="cam big c1" data-ch="CH 1"></div><div class="cam c2" data-ch="CH 2"></div>
+        <div class="cam c3" data-ch="CH 3"></div><div class="cam c4" data-ch="CH 4"></div>
+        <div class="cam c5" data-ch="CH 5"></div><div class="cam c6" data-ch="CH 6"></div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<section class="alt" id="how">
+  <div class="wrap">
+    <h2>Up and running in three steps</h2>
+    <p class="section-lede">No command line, no Python, nothing else to install. Everything is set up in your browser.</p>
+    <ol class="steps">
+      <li><h3>Download</h3><p>Get the file for your computer below. It's one file with everything inside.</p></li>
+      <li><h3>Double-click it</h3><p>Your browser opens the setup page. The first time, your computer asks you to confirm
+        <a href="/guide/#first-run">(here's how)</a>.</p></li>
+      <li><h3>Enter your DVR</h3><p>Pick the brand, type its IP address, username and password, and choose the cameras. Done:
+        they all appear at once.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Download DVR Viewer</h2>
+    <p class="section-lede">Version 0.3.0 · free forever · <a href="https://github.com/tierbuilder/dvr-nvr-viewer/releases">all releases and checksums</a></p>
+    <div class="downloads">
+      <div class="dl" data-os="windows"><div><b>Windows 10 / 11</b><span>dvr-nvr-viewer-windows-x64.exe · double-click to start</span></div>
+        <a class="btn btn-primary" href="/download/windows">Download</a></div>
+      <div class="dl" data-os="mac-arm"><div><b>Mac with Apple silicon (M1, M2, M3, M4…)</b><span>dvr-nvr-viewer-macos-arm64.zip · unzip, then double-click DVR Viewer</span></div>
+        <a class="btn btn-primary" href="/download/mac">Download</a></div>
+      <div class="dl" data-os="mac-intel"><div><b>Mac with Intel processor</b><span>dvr-nvr-viewer-macos-x64.zip</span></div>
+        <a class="btn btn-ghost" href="/download/mac-intel">Download</a></div>
+      <div class="dl" data-os="linux"><div><b>Linux (64-bit PC)</b><span>dvr-nvr-viewer-linux-x64 · make it executable and run it</span></div>
+        <a class="btn btn-ghost" href="/download/linux">Download</a></div>
+      <div class="dl" data-os="pi"><div><b>Raspberry Pi 4 / 5 (64-bit Raspberry Pi OS)</b><span>dvr-nvr-viewer-linux-arm64 · great as an always-on camera server</span></div>
+        <a class="btn btn-ghost" href="/download/raspberry-pi">Download</a></div>
+    </div>
+    <p class="cta-note">Not sure which Mac you have? Apple menu &gt; About This Mac: "Chip: Apple M…" means Apple silicon.
+      On a phone or tablet? Run DVR Viewer on a computer at home and open its link on the phone.</p>
+  </div>
+</section>
+
+<section class="alt" id="features">
+  <div class="wrap">
+    <h2>Everything you need, nothing you don't</h2>
+    <p class="section-lede">Made for people who just want to see their cameras, without a vendor app or another subscription.</p>
+    <div class="grid three">
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+        <h3>All cameras at once</h3><p>Grid, 2×2, 3×3, one big plus five or seven small, or a single camera. Tap a camera to make it big.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
+        <h3>Every phone in the house</h3><p>Open one link on any phone, tablet or computer on your Wi-Fi. Nothing to install on them.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div>
+        <h3>Private by design</h3><p>No cloud and no account. Video and passwords stay on your home network.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12a8 8 0 1 0 3-6.3"/><path d="M4 4v4h4"/></svg></div>
+        <h3>Kind to old DVRs</h3><p>Streams only what's on screen, uses the lighter stream for small tiles, and never retries a wrong password, so the DVR won't lock you out.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></div>
+        <h3>Independent tiles</h3><p>A slow or broken camera only freezes its own tile. The others keep playing and it reconnects by itself.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg></div>
+        <h3>Open source</h3><p>MIT-licensed. Read every line on GitHub, build it yourself, or run it on a Raspberry Pi.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="brands">
+  <div class="wrap">
+    <h2>Works with your DVR, NVR or IP camera</h2>
+    <p class="section-lede">Built-in presets for the common brands, plus a box for any RTSP address.
+      <a href="/brands/">See the RTSP address each brand uses.</a></p>
+    <div class="grid">
+      <div class="card"><h3>Dahua family</h3><p>Dahua, Amcrest, Lorex, CP Plus, IMOU</p></div>
+      <div class="card"><h3>Hikvision family</h3><p>Hikvision, HiLook, HiWatch, Annke, EZVIZ</p></div>
+      <div class="card"><h3>TP-Link</h3><p>VIGI NVRs and cameras, Tapo cameras</p></div>
+      <div class="card"><h3>And more</h3><p>Reolink, Uniview, Hanwha / Wisenet, Axis, Bosch, Milesight, Foscam, XMEye / NetSurveillance</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="faq">
+  <div class="wrap prose">
+    <h2>Questions</h2>
+    <details class="faq" open><summary>Is DVR Viewer really free?</summary>
+      <p>Yes. It's free and open source (MIT license). There's no account, no subscription, no ads and no cloud service.</p></details>
+    <details class="faq"><summary>My old DVR's web page asks for an NPAPI or ActiveX plugin. Will this work?</summary>
+      <p>Yes, that's what it was made for. DVR Viewer reads the cameras over RTSP, which almost every DVR and NVR supports, and shows them in a normal web page, so no plugin is needed.</p></details>
+    <details class="faq"><summary>Does my video go to the internet or a cloud server?</summary>
+      <p>No. The app runs on your own computer and talks to the DVR on your home network. Video and passwords never leave your network.</p></details>
+    <details class="faq"><summary>Can I watch on my phone?</summary>
+      <p>Yes. Run DVR Viewer on one computer (or a Raspberry Pi) and open the link it shows on any phone or tablet on the same Wi-Fi. Nothing needs to be installed on the phone.</p></details>
+    <details class="faq"><summary>Which DVR and camera brands work?</summary>
+      <p>Any DVR, NVR or IP camera with RTSP. Built-in presets cover Dahua, Amcrest, Lorex, CP Plus, IMOU, Hikvision, HiLook, Annke, EZVIZ, TP-Link VIGI and Tapo, Reolink, Uniview, Hanwha/Wisenet, Axis, Bosch, Milesight, Foscam and XMEye; other brands can type their RTSP address. <a href="/brands/">Details per brand</a>.</p></details>
+    <details class="faq"><summary>Why does Windows or macOS warn me when I first open it?</summary>
+      <p>The download isn't signed with a paid Apple or Microsoft certificate, so the system asks once. On Windows click <b>More info</b>, then <b>Run anyway</b>. On a Mac open <b>System Settings &gt; Privacy &amp; Security</b> and click <b>Open Anyway</b>. The full source code is public on GitHub. <a href="/guide/#first-run">Step-by-step help</a>.</p></details>
+    <details class="faq"><summary>Can I watch from outside my home?</summary>
+      <p>DVR Viewer is made for your home network and shouldn't be exposed to the internet directly. To watch from outside, use a VPN to your home network (for example WireGuard or Tailscale) and open the same link.</p></details>
+    <details class="faq"><summary>Does it record?</summary>
+      <p>No, it's a live viewer. Your DVR keeps recording as usual. There's no playback, audio or PTZ control.</p></details>
+  </div>
+</section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <span>DVR Viewer is free, open-source software (MIT). Not affiliated with any camera brand.</span>
+    <nav aria-label="Footer">
+      <a href="/guide/">Setup guide</a><a href="/brands/">Brands &amp; RTSP addresses</a>
+      <a href="https://github.com/tierbuilder/dvr-nvr-viewer">Source code</a>
+      <a href="https://github.com/tierbuilder/dvr-nvr-viewer/issues">Report a problem</a>
+    </nav>
+  </div>
+</footer>
+<script src="/site.js" defer></script>
+</body>
+</html>
