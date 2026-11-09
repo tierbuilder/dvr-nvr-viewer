@@ -34,7 +34,15 @@ jobs:
           python --version
           ffmpeg -hide_banner -version
       - name: Run tests
-        run: python -m unittest discover -s tests -v
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee test-output.txt
+      - name: Show failing tests as annotations
+        if: failure()
+        shell: bash
+        # annotations are public, unlike the raw log, so failures can be read without signing in
+        run: python tools/annotate_failures.py test-output.txt
       - name: Command works when installed
         run: |
           python -m pip install .

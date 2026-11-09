@@ -221,6 +221,7 @@ class RtspConnection:
     def ask(self, request):
         """Sends one request; returns the status code and the headers of the answer."""
         for attempt in (1, 2):
+            reused = self.sock is not None
             try:
                 if self.sock is None:
                     self.sock = socket.create_connection((self.host, self.port), timeout=15)
@@ -249,6 +250,13 @@ class RtspConnection:
                 raise DvrUnreachable(f"The DVR at {self.host}:{self.port} didn't answer within 15 seconds (twice). "
                                      "It may be busy (too many viewers or streams at once) or restarting. Close other "
                                      "viewers (vendor apps, VLC, other copies of this), wait a minute and retry.")
+            except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+                # the DVR hung up after its last answer (some do, after a 401): ask again on a new connection
+                self.sock.close()
+                self.sock = None
+                if reused and attempt == 1:
+                    continue
+                raise DvrUnreachable(f"The DVR at {self.host}:{self.port} closed the connection without answering.")
             except ConnectionRefusedError:
                 raise DvrUnreachable(f"Something is at {self.host}, but nothing answers on port {self.port}. "
                                      "Check the RTSP port (usually 554), and that RTSP is turned on in the DVR's "
